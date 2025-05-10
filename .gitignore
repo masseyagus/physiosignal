@@ -1,0 +1,63 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Entornos virtuales Python / Conda
+# directorio de entorno virtual creado por venv/env
+env/
+venv/
+ENV/
+.venv/
+
+# entorno Conda (nombre por defecto “.conda_env” o similar)
+.conda/
+*.conda
+# miniconda o Anaconda dentro del proyecto
+anaconda3/
+miniconda3/
+
+# Archivos de lock de Conda
+environment.yml
+environment.lock.yml
+
+# VS Code
+.vscode/
+
+# Archivos personales de configuración
+*.env
+.env.*
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Logs y bases de datos locales
+*.log
+*.sqlite3
+*.db
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Temporales de prueba
+*.tmp
+*.bak
+**/test/
+
+# Cobertura de tests
+.coverage
+coverage.xml
+htmlcov/
+.pytest_cache/
+
+# Distribución de paquetes
+build/
+dist/
+*.egg-info/
+
+# Archivos personales
+
+
+# Workspaces de VS Code
+*.code-workspace
