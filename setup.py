@@ -11,5 +11,5 @@ setup(
         "matplotlib>=3.5",
         "scipy>=1.9"
     ],
-    python_requires=">=3.10",
+    python_requires=">=3.10"
 )
