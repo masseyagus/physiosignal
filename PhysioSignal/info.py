@@ -42,7 +42,12 @@ class Info():
         # Convierto a ch_types en lista si es string
         if isinstance(self.ch_types, str):
             self.ch_types = [self.ch_types] * len(self.ch_names) if self.ch_names else []
-        
+
+        # Genero la misma cantidad de valores que ch_names si es una lista de un solo
+        elif isinstance(self.ch_types, list):
+            if len(self.ch_types) == 1:
+                self.ch_types = self.ch_types * len(self.ch_names)
+
         # Valido longitud de ch_types vs ch_names
         if len(self.ch_names) != len(self.ch_types):
             raise ValueError("La cantidad de ch_names y ch_types debe ser igual")
