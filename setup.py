@@ -1,8 +1,8 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="physiosignal",
-    version="1.0.0",
+    name="PhysioSignal",
+    version="1.1.0",
     description="Librería para procesamiento de señales EEG, ECG y EMG",
     author="Agustín Quintana",
     packages=find_packages(),
