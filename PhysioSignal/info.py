@@ -136,19 +136,3 @@ class Info():
         
         display(styled_table)
 
-def main():
-    canales=[i+1 for i in range(5)]
-
-    info = Info(
-    ch_names=canales,
-    ch_types=["eeg"]*len(canales),
-    bad_channels=['Cz'],
-    sfreq=512,
-    register_type="Registro EEG para análisis de patrones ERDS",
-    experimenter="MSc. PEREYRA Magalí",
-    subject_info={"edad": 22, "sexo": "F"}
-    )
-    info.visualizeInfo()
-
-if __name__ == "__main__":
-    main()
