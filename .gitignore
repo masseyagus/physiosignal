@@ -43,7 +43,7 @@ Thumbs.db
 # Temporales de prueba
 *.tmp
 *.bak
-**/test/
+**/tests/
 
 # Cobertura de tests
 .coverage
