@@ -1,10 +1,15 @@
 from setuptools import setup
 
 setup(
-    name = "Trabajo Integrador Final 2025",
-    version = "0.0.0",
-    author = "Agustín Quintana",
-    author_email = "agustingabriel2002@gmail.com",
-    description = "...",
-    python_requires = ">3.9"
+    name="physiosignal",
+    version="1.0.0",
+    description="Librería para procesamiento de señales EEG, ECG y EMG",
+    author="Agustín Quintana",
+    install_requires=[
+        "numpy>=1.21",
+        "pandas>=1.3",
+        "matplotlib>=3.5",
+        "scipy>=1.9"
+    ],
+    python_requires=">=3.10",
 )
