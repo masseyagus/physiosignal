@@ -1,49 +1,81 @@
 from dataclasses import dataclass, field, asdict
-import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s [%(name)s.%(funcName)s]: %(message)s",
-    datefmt="%d-%m-%Y %H:%M:%S"
-)
+from typing import Union, Dict, List
 
 @dataclass
 class Info():
     """
     Clase para almacenar y gestionar metadatos de registros de señales fisiológicas.
-    Implementa comportamiento similar a un diccionario con funcionalidades adicionales.
-    
+    Implementa comportamiento similar a diccionario con funcionalidades extendidas para
+    manejo seguro de metadatos biomédicos.
+
     Args:
-        ch_names: Nombres de los canales de señal
-        ch_types: Tipo(s) de los canales (str o lista por canal)
-        sfreq: Frecuencia de muestreo en Hz (valor numérico)
-        bad_channels: Lista de canales marcados como defectuosos
-        experimenter: Nombre del responsable del registro
-        subject_info: Información adicional del sujeto
-        register_type: Tipo de registro o experimento
-        
+        ch_names: Lista de nombres de canales (default: lista vacía)
+        ch_types: Tipo(s) de canal - cadena única o lista por canal (default: lista vacía)
+        sfreq: Frecuencia de muestreo en Hz (default: 512.0)
+        bad_channels: Lista de canales marcados como defectuosos (default: lista vacía)
+        experimenter: Nombre del experimentador/responsable (opcional)
+        subject_info: Información adicionañ del sujeto en formato str/dict (opcional)
+        register_type: Tipo de registro/experimento (opcional)
+
     Raises:
-        KeyError: Al acceder a atributos inexistentes
-        ValueError: En operaciones de renombrado inválidas
+        KeyError: Al acceder a atributos no existentes mediante operador []
+        ValueError: En operaciones de renombrado inválidas o datos inconsistentes
     """
-    ch_names:list[str] = field(default_factory=list)
-    ch_types:str|list[str] = field(default_factory=list)
+    ch_names:List[str] = field(default_factory=list)
+    ch_types:Union[str, List[str]] = field(default_factory=list)
     sfreq:float = field(default_factory=512.0)
-    bad_channels:list = field(default_factory=list)
+    bad_channels:List[str] = field(default_factory=list)
     experimenter:str=None
     subject_info:str=None
     register_type:str=None
 
+    def __post_init__(self):
+        """
+        Inicialización posterior para validar consistencia de datos.
+        Convierte tipos de canal a formato lista cuando es necesario.
+        
+        Raises:
+            ValueError: Si hay discrepancia en cantidad de canales/tipos
+                        Si la frecuencia de muestreo es menor a 1 Hz
+        """
+
+        # Convierto a ch_types en lista si es string
+        if isinstance(self.ch_types, str):
+            self.ch_types = [self.ch_types] * len(self.ch_names) if self.ch_names else []
+        
+        # Valido longitud de ch_types vs ch_names
+        if len(self.ch_names) != len(self.ch_types):
+            raise ValueError("La cantidad de ch_names y ch_types debe ser igual")
+        
+        # Validar sfreq positivo
+        if self.sfreq < 1:
+            raise ValueError("La frecuencia de muestreo debe ser ≥ 1 Hz")
+
     def __contains__(self, key:str) -> bool:
         """
-        Verifica la existencia de un atributo en la instancia
+        Verifica si un atributo existe en la instancia.
+
+        Args:
+            key: Nombre del atributo a verificar
+
+        Returns:
+            bool: True si el atributo existe, False en caso contrario
         """
         # Uso de hasattr para chequeo directo de atributos
         return hasattr(self, key)
 
     def __getitem__(self, key:str):
         """
-        MAcceso a atributos mediante sintaxis de diccionario
+        Acceso tipo diccionario a los atributos de la instancia.
+
+        Args:
+            key: Nombre del atributo a recuperar
+
+        Returns:
+            Valor del atributo solicitado
+
+        Raises:
+            KeyError: Si el atributo no existe en la instancia
         """
         if hasattr(self, key):
             return getattr(self, key)
@@ -53,24 +85,37 @@ class Info():
     
     def __len__(self) -> int:
         """
-        Cantidad total de atributos registrados
+        Devuelve la cantidad de atributos declarados en la clase.
+
+        Returns:
+            int: Número total de campos en la dataclass
         """
         # Uso de __annotations__ para obtener campos declarados
         return len(self.__annotations__)
     
     def get(self, key:str=None, value=None):
         """
-        Acceso seguro a atributos con valor por defecto opcional
+        Recupera un atributo con valor por defecto opcional.
+
+        Args:
+            key: Nombre del atributo a recuperar
+            value: Valor a devolver si el atributo no existe (default: None)
+
+        Returns:
+            Valor del atributo o valor por defecto si no existe
         """
         return getattr(self, key, value)
     
-    def items(self) -> dict:
+    def items(self) -> Dict:
         """
-        Devuelve pares key-value como diccionario
+        Devuelve todos los atributos como diccionario clave-valor.
+
+        Returns:
+            dict: Diccionario con {nombre_atributo: valor}
         """
         return asdict(self)
 
-    def rename_channels(self, new_names:dict) -> None:
+    def rename_channels(self, new_names:dict) -> "Info":
         """
         Renombra canales manteniendo la integridad de los datos asociados
         
@@ -78,10 +123,11 @@ class Info():
             new_names: Diccionario con mapeo {nombre_actual: nombre_nuevo}
             
         Returns:
-            Instancia actualizada para permitir method chaining
-            
-        Raises:
-            ValueError: Si hay nombres inválidos o duplicados
+            Info: Instancia actualizada (permite method chaining)
+
+        Raises:  
+            ValueError: Si algún nombre antiguo no existe
+                        Si se generan nombres duplicados
         """
         # Validación de nombres existentes
         for old_name in new_names: # Tomo cada nombre nuevo
@@ -96,16 +142,16 @@ class Info():
             duplicado = {name for name in new if new.count(name) > 1}
             raise ValueError(f"Existen nombres duplicados dentro de la lista: {duplicado}")
        
-    #    Actualización de atributos
+        # Actualización de atributos
         self.ch_names = new 
         self.bad_channels = [new_names.get(bad, bad) for bad in self.bad_channels]
 
         return self
-              
 
     def visualizeInfo(self):
         """
-        Visualización de los atributos del objeto en formato de tabla
+        Muestra los metadatos en formato de tabla estilizada (HTML).
+        Requiere entorno compatible con visualización HTML (ej: Jupyter Notebook).
         """
         import pandas as pd
         from IPython.display import display
@@ -136,3 +182,15 @@ class Info():
         
         display(styled_table)
 
+    def filter_by_type(self, ch_type:str) -> List[str]:
+        """
+        Filtra canales por tipo especificado.
+
+        Args:
+            ch_type: Tipo de canal a filtrar (ej: 'eeg', 'ecg')
+
+        Returns:
+            List[str]: Lista de nombres de canales que coinciden con el tipo
+        """
+
+        return [nombre for nombre, tipo in zip(self.ch_names, self.ch_types) if tipo == ch_type.lower()]
