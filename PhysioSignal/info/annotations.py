@@ -1,7 +1,11 @@
 from dataclasses import dataclass
+from typing import List
 
 @dataclass
 class Annotations:
+    onset:List[float]
+    duration:List[float]
+    description:List[str]
 
     def add(self):
         pass
