@@ -1,11 +1,11 @@
-from dataclasses import dataclass
-from typing import List
+from physiosignal.utils import _checking, _sort
 
-@dataclass
 class Annotations:
-    onset:List[float]
-    duration:List[float]
-    description:List[str]
+
+    def __init__(self, onset, duration, description, ch_names):
+        self. onset, self.duration, self.description, self.ch_names = _checking(onset, duration, description, ch_names)
+        
+        self._sort()
 
     def add(self):
         pass
@@ -24,4 +24,4 @@ class Annotations:
 
     def load(self):
         pass
-    pass
+    
