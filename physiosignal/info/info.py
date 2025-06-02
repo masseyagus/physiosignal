@@ -2,7 +2,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Union, Dict, List
 
 @dataclass
-class Info():
+class Info:
     """
     Clase para almacenar y gestionar metadatos de registros de señales fisiológicas.
     Implementa comportamiento similar a diccionario con funcionalidades extendidas para
