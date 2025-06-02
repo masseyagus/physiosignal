@@ -16,23 +16,26 @@ def _checking(onset, duration, description, ch_names):
         description = np.repeat(description, len(onset))
     if description.ndim != 1:
         raise ValueError("Descrpition debe ser un array de 1 dimensión")
+    
+    params = list(map(len, [onset, duration, description]))
 
-    ch_names = np.array(ch_names, dtype=str)
-    if ch_names.ndim == 0 or ch_names.shape == (1,):
-        ch_names = np.repeat(ch_names, len(onset))
-    if ch_names.ndim != 1:
-        raise ValueError("Ch_names debe ser un array de 1 dimensión")
-    
-    if not len(onset) == len(duration) == len(description) == len(ch_names):
-        raise ValueError(f"Todos los parámetros deben poseer el mismo largo {len(onset)}")
-    
+    if ch_names is not None:
+        ch_names = np.array(ch_names, dtype=str)
+        if ch_names.ndim == 0 or ch_names.shape == (1,):
+            ch_names = np.repeat(ch_names, len(onset))
+        if ch_names.ndim != 1:
+            raise ValueError("Ch_names debe ser un array de 1 dimensión")
+        params.append(len(ch_names))
+        
+    if len(set(params)) != 1:
+        raise ValueError(f"Todos los parámetros deben poseer el mismo largo. Largos hallados: {params}")
 
     return onset, duration, description, ch_names
 
 def _sort(self):
     orden = np.argsort(self.onset)
     self.onset = self.onset[orden]
-    self.duration = self.durarion[orden]
+    self.duration = self.duration[orden]
     self.description = self.description[orden]
     if self.ch_names is not None:
         self.ch_names = self.ch_names[orden]
