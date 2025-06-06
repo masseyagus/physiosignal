@@ -1,12 +1,23 @@
 from __future__ import annotations
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from physiosignal.info import Info
+# from typing import TYPE_CHECKING
+# if TYPE_CHECKING:
+#     from physiosignal.info import Info
+
+from physiosignal.info import Info
+from physiosignal.info import Annotations
+from physiosignal.logger import log_config
+import matplotlib.pyplot as plt
+import logging
+
+# Configuración global del logger
+log_config(see_log=True)
+
+logger = logging.getLogger(__name__)
 
 # Futura implementación
 class RawSignal:
 
-    def __init__(self, data, sfrq, info:Info, anotaciones, first_samp):
+    def __init__(self, data, sfrq, info:Info, anotaciones:Annotations, first_samp):
         pass
 
     def get_data(self, picks, start, stop, reject, times):
