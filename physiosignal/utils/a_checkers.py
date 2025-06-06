@@ -1,6 +1,22 @@
 import numpy as np
 
 def _checking(onset, duration, description, ch_names):
+    """
+    Valida y formatea los parámetros de entrada para crear anotaciones.
+
+    Args:
+        onset: Tiempos de inicio de las anotaciones (puede ser escalar o array-like)
+        duration: Duración de las anotaciones (puede ser escalar o array-like)
+        description: Descripción de las anotaciones (puede ser escalar o array-like)
+        ch_names: Nombres de canales asociados (puede ser None, escalar o array-like)
+
+    Returns:
+        tuple: (onset, duration, description, ch_names) formateados como arrays 1D
+
+    Raises:
+        ValueError: Si los parámetros no son arrays 1D o tienen longitudes inconsistentes
+        TypeError: Si los tipos de entrada no son convertibles al formato requerido
+    """
     onset = np.atleast_1d(np.array(onset, dtype=float))
     if onset.ndim != 1:
         raise ValueError("Onset debe ser un array de 1 dimensión")
@@ -33,6 +49,16 @@ def _checking(onset, duration, description, ch_names):
     return onset, duration, description, ch_names
 
 def _sort(self):
+    """
+    Ordena las anotaciones en base al tiempo de inicio (onset) de forma ascendente.
+
+    Modifica los siguientes atributos in-place:
+        self.onset, self.duration, self.description, self.ch_names
+
+    Notes:
+        Utiliza np.argsort para determinar el orden de los índices
+        Mantiene la coherencia entre todos los atributos durante el reordenamiento
+    """
     orden = np.argsort(self.onset)
     self.onset = self.onset[orden]
     self.duration = self.duration[orden]
