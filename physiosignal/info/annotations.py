@@ -237,10 +237,6 @@ class Annotations:
         elif isinstance(filtros, (float, str)):
             fila_val, col_val = filtros, None
 
-        # Muestro todo si no se indica filtro
-        if fila_val is None and col_val is None:
-            return df
-        
         # Inicializo df_filas con todo el DataFrame por defecto
         df_filas = df.copy()
 
