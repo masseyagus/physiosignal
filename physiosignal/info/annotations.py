@@ -161,7 +161,7 @@ class Annotations:
 
             logging.info(f"Anotación eliminada correctamente")
 
-    def get_annotations(self, filtros:tuple|list=None):
+    def get_annotations(self):
         """
         Retorna todas las anotaciones como DataFrame con longitud consistente.
 
