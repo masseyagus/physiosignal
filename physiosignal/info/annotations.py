@@ -23,25 +23,28 @@ class Annotations:
                          para que coincida en longitud con las otras columnas.
     """
 
-    def __init__(self, onset, duration, description, ch_names=None, see_logs:bool=True):
+    def __init__(self, onset=None, duration=None, description=None, ch_names=None, see_logs:bool=True):
         """
-        Inicializa un nuevo conjunto de anotaciones con validación y ordenamiento.
+        Inicializa una nueva instancia de anotaciones con validación, normalización y ordenamiento.
 
         Args:
-            onset: Tiempo(s) de inicio (escalar, lista o array)
-            duration: Duración(es) (escalar, lista o array)
-            description: Descripción(es) (escalar, lista o array)
-            ch_names: Canales asociados (None, string, lista simple o lista de listas)
-            see_logs: Habilita/deshabilita logs para esta instancia
+            onset (float, list o array, opcional): Tiempo(s) de inicio de las anotaciones.
+            duration (float, list o array, opcional): Duración(es) de las anotaciones.
+            description (str, list o array, opcional): Descripción(es) de las anotaciones.
+            ch_names (None, str, lista simple o lista de listas, opcional): Canales asociados a cada anotación.
+            see_logs (bool, opcional): Controla si se habilitan los logs para esta instancia (por defecto True).
 
         Raises:
-            ValueError: Si los parámetros no cumplen validaciones de formato o longitud
-            TypeError: Si los tipos de datos no son convertibles al formato requerido
+            ValueError: Si los parámetros no cumplen con los requisitos de formato o longitud.
+            TypeError: Si alguno de los parámetros no puede convertirse al tipo requerido.
 
         Notes:
-            - Realiza validación de formatos y longitudes mediante _checking()
-            - Ordena las anotaciones por tiempo de inicio ascendente usando _sort()
-            - Convierte ch_names a array de objetos donde cada elemento es None o lista de strings
+            - Utiliza la función `_checking()` para validar y formatear los parámetros de entrada, asegurando que 
+            todos sean arrays 1D con longitudes coherentes.
+            - Aplica `_sort()` para ordenar las anotaciones según el tiempo de inicio (`onset`) en orden ascendente.
+            - Convierte `ch_names` a un array de objetos donde cada elemento puede ser `None` o una lista de cadenas,
+            facilitando el manejo uniforme de canales asociados.
+            - Configura el logger para la instancia y permite habilitar o deshabilitar la salida de logs mediante `see_logs`.
         """
         # Hago comprobaciones de los parámetros
         self. onset, self.duration, self.description, self.ch_names = _checking(onset, duration, description, ch_names)
@@ -158,7 +161,7 @@ class Annotations:
 
             logging.info(f"Anotación eliminada correctamente")
 
-    def get_annotations(self):
+    def get_annotations(self, filtros:tuple|list=None):
         """
         Retorna todas las anotaciones como DataFrame con longitud consistente.
 
@@ -203,16 +206,112 @@ class Annotations:
         # Ahora len(info['ch_names']) == n y el DataFrame no dará error
         return pd.DataFrame.from_dict(info, orient="columns")
 
-    def find(self, description):
+    def find(self, filtros:tuple|list):
+        """
+        Busca y filtra anotaciones según un valor específico y, opcionalmente, una columna.
 
-        df = pd.DataFrame(self._getInfo(), orient='columns')
+        Args:
+            filtros (tuple | list): 
+                Puede ser una tupla o lista con uno o dos elementos:
+                
+                - Si contiene un único valor (`float` o `str`), se buscará en todas las columnas.
+                - Si contiene dos elementos `(valor, columna)`, se buscará `valor` únicamente dentro de la columna especificada.
 
+        Returns:
+            pd.DataFrame: Un DataFrame con las filas o columnas filtradas según el criterio dado.
 
-    def save(self):
-        pass
+        Raises:
+            LookupError: Si no se encuentra la columna indicada o si no se hallan registros que coincidan con el filtro.
 
-    def load(self):
-        pass
+        Notes:
+            - Si no se proporciona ningún filtro, se devuelve el DataFrame completo.
+            - La búsqueda es exacta y sensible a mayúsculas/minúsculas.
+        """
+        info = self.get_annotations()
+
+        df = pd.DataFrame.from_dict(info, orient="columns")
+
+        fila_val, col_val = (None, None)
+        if isinstance(filtros, (tuple, list)) and len(filtros) == 2:
+            fila_val, col_val = filtros
+        elif isinstance(filtros, (float, str)):
+            fila_val, col_val = filtros, None
+
+        # Muestro todo si no se indica filtro
+        if fila_val is None and col_val is None:
+            return df
+        
+        # Inicializo df_filas con todo el DataFrame por defecto
+        df_filas = df.copy()
+
+        # Filtro filas si se indicó fila_val
+        if fila_val is not None:
+            mask = df.eq(fila_val)
+            df_filas = df.loc[mask.any(axis=1)]
+
+        # Filtro filas si se indicó col_val
+        if col_val is not None:
+            if col_val not in df.columns:
+                raise LookupError(f"No se encontró columna con nombre {col_val}")
+            
+            df_filas = df_filas.loc[:,[col_val]]
+
+        if df_filas.empty:
+            raise LookupError(f"No se encontraron registros con los filtros proporcionados {filtros}")
+
+        return df_filas
+
+    def save(self, filename:str):
+        """
+        Guarda las anotaciones actuales en un archivo CSV.
+
+        Args:
+            filename (str): Nombre (o ruta) del archivo sin extensión donde se guardarán las anotaciones.  
+                            La función añadirá automáticamente la extensión '.csv'.
+
+        Returns:
+            None
+
+        Notes:
+            - El archivo CSV se guardará sin incluir índices de fila.
+            - La información guardada corresponde a los datos retornados por el método `get_annotations()`.
+            - Se genera un log de información confirmando el guardado exitoso del archivo.
+        """
+        df = self.get_annotations()
+
+        df.to_csv(f"{filename}.csv", index=False)
+
+        logging.info(f"Archivo {filename}.csv guardado correctamente")
+
+    def load(self, path:str):
+        """
+        Carga anotaciones desde un archivo CSV y crea una instancia de `Annotations`.
+
+        Args:
+            path (str): Ruta al archivo CSV que contiene las anotaciones.  
+                        El archivo debe contener al menos las columnas 'onset', 'duration' y 'description'.  
+                        La columna 'ch_names' es opcional.
+
+        Returns:
+            Annotations: Una instancia de la clase `Annotations` inicializada con los datos cargados.
+
+        Raises:
+            FileNotFoundError: Si el archivo especificado no existe.
+            pd.errors.ParserError: Si el archivo CSV no tiene el formato correcto.
+            KeyError: Si faltan las columnas obligatorias ('onset', 'duration' o 'description') en el CSV.
+        """
+        df = pd.read_csv(path)
+
+        raw_onset = df['onset']
+        raw_duration = df['duration']
+        raw_description = df['description']
+
+        if "ch_names" in df.columns:
+            raw_ch_names = df['ch_names']
+        else:
+            raw_ch_names = None
+        
+        return Annotations(onset=raw_onset, duration=raw_duration, description=raw_description, ch_names=raw_ch_names)
     
     def _getInfo(self):
         """
