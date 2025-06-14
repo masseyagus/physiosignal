@@ -279,7 +279,7 @@ class Annotations:
 
         logging.info(f"Archivo {filename}.csv guardado correctamente")
 
-    def load(self, path:str):
+    def load(path:str):
         """
         Carga anotaciones desde un archivo CSV y crea una instancia de `Annotations`.
 
@@ -300,7 +300,7 @@ class Annotations:
 
         raw_onset = df['onset']
         raw_duration = df['duration']
-        raw_description = df['description']
+        raw_description = df['description'] if 'description' in df.columns else df['event_id']
 
         if "ch_names" in df.columns:
             raw_ch_names = df['ch_names']
