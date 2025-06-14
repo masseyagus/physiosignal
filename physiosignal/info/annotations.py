@@ -279,7 +279,7 @@ class Annotations:
 
         logging.info(f"Archivo {filename}.csv guardado correctamente")
 
-    def load(path:str):
+    def load(self, path:str):
         """
         Carga anotaciones desde un archivo CSV y crea una instancia de `Annotations`.
 
