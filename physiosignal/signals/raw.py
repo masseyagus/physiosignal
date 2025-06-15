@@ -1,7 +1,4 @@
 from __future__ import annotations
-# from typing import TYPE_CHECKING
-# if TYPE_CHECKING:
-#     from physiosignal.info import Info
 
 from physiosignal.info import Info
 from physiosignal.info import Annotations
@@ -25,7 +22,6 @@ class RawSignal:
         self.antoaciones = anotaciones # Objeto Annotations
         self.sfreq = self.info.sfreq if sfreq is None else sfreq
         self.first_samp = first_samp # Índice de la primera muestra
-
 
     def get_data(self, picks:str|np.array=None, start:float=None, stop:float=None, reject:float=None, times:bool=False):
         """
@@ -121,11 +117,79 @@ class RawSignal:
 
         return data
 
-    def drop_channels(self, ch_names) -> RawSignal:
-        pass
+    def drop_channels(self, ch_names:str|list|tuple, inplace:bool=True) -> RawSignal:
+        """
+        Elimina uno o varios canales de la señal.
+
+        Args:
+            ch_names: Nombre(s) de canal(es) a descartar.
+                - str: un único canal.
+                - list o tuple de str: varios canales.
+            inplace: Si True, modifica el objeto actual y devuelve `self`.
+                Si False, no altera el original y retorna una nueva instancia.
+
+        Returns:
+            RawSignal:
+                - Si inplace=True: el mismo objeto (`self`) con los canales eliminados.
+                - Si inplace=False: una nueva instancia de RawSignal con los cambios.
+
+        Raises:
+            TypeError:
+                - Si `ch_names` no es str, list ni tuple.
+                - Si algún elemento de `ch_names` no es str.
+            ValueError:
+                - Si algún nombre de canal no existe en `self.info.ch_names`.
+
+        Notes:
+            - Convierte siempre `ch_names` a lista de str antes de procesar.
+            - Busca los índices de cada canal y los ordena en orden inverso
+            para evitar desplazamientos al hacer pop.
+            - Tanto `self.info.ch_names` como `self.info.ch_types` se copian y
+            actualizan sin desordenar el original (salvo que inplace=True).
+            - Se elimina la fila correspondiente en `self.data` usando `np.delete`.
+        """
+        if isinstance(ch_names, str):
+            ch_names = [ch_names]
+        elif isinstance(ch_names, (list, tuple)):
+            ch_names = list(ch_names)
+        else:
+            raise TypeError(f"El parámetro ch_names debe ser list, tuple o str")
+
+        idx = []
+
+        for ch in ch_names:
+            if isinstance(ch, str):
+                try:
+                    idx.append(self.info.ch_names.index(ch))
+                except:
+                    raise TypeError(f"Cada ítem en ch_names debe ser str o int; se recibió {type(ch).__name__}")
+                
+        drop_idx = sorted(idx, reverse=True)
+
+        info_ch_names = list(self.info.ch_names)
+        info_ch_types = list(self.info.ch_types)
+        data = self.data.copy()
+
+        for i in drop_idx:
+            info_ch_names.pop(i)
+            info_ch_types.pop(i)
+            data = np.delete(data, i, axis=0)
+
+        newInfo = Info(ch_names=info_ch_names, ch_types=info_ch_types, sfreq=self.sfreq)
+        newRaw = RawSignal(data=data, info=newInfo, anotaciones=self.antoaciones, first_samp=self.first_samp)
+
+        if inplace:
+            self.info = newInfo
+            self.data = data
+            return self
+        else:
+            return newRaw
 
     def crop(self, tmin, tmax) -> RawSignal:
-        pass
+
+        crop_data = self.get_data(start=tmin, stop=tmax)
+
+        return RawSignal(data=crop_data, sfreq=self.sfreq, info=self.info, anotaciones=self.antoaciones, first_samp=self.first_samp)
 
     def describe(self):
         pass
