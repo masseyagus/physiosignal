@@ -14,12 +14,49 @@ logger = logging.getLogger(__name__)
 
 # Futura implementación
 class RawSignal:
+    """
+    Representa una señal de datos crudos (por ejemplo, EEG) junto con su
+    información de muestreo, metadatos de canales y anotaciones de eventos.
 
+    Attributes
+    ----------
+    data : np.ndarray
+        Matriz de forma (n_canales, n_muestras) con los valores de la señal.
+    sfreq : float
+        Frecuencia de muestreo en Hz.
+    info : Info
+        Objeto Info que contiene metadatos de los canales (nombres, tipos, etc.).
+    anotaciones : Annotations
+        Objeto Annotations con las marcas de eventos o anotaciones temporales.
+    first_samp : int
+        Índice de la primera muestra de `data` respecto al inicio de la grabación
+        original. 
+    """
     def __init__(self, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, first_samp:int=0):
+        """
+        Inicializa una instancia de RawSignal.
 
+        Parameters
+        ----------
+        data : np.ndarray, optional
+            Matriz con los datos de la señal, de forma (n_canales, n_muestras).
+            Por defecto None.
+        sfreq : float, optional
+            Frecuencia de muestreo en Hz. Si se omite (None), se toma de
+            `info.sfreq`. Por defecto None.
+        info : Info, optional
+            Objeto Info con metadatos de canales (nombres, tipos, etc.). Por
+            defecto None.
+        anotaciones : Annotations, optional
+            Objeto Annotations con las marcas de eventos o anotaciones temporales.
+            Por defecto None.
+        first_samp : int, optional
+            Índice de la primera muestra de `data` con respecto al inicio del
+            registro original (por defecto 0).
+        """
         self.data = data # Matriz con forma (n_canales, n_muestras)
         self.info = info # Objeto Info
-        self.antoaciones = anotaciones # Objeto Annotations
+        self.anotaciones = anotaciones # Objeto Annotations
         self.sfreq = self.info.sfreq if sfreq is None else sfreq
         self.first_samp = first_samp # Índice de la primera muestra
 
@@ -107,11 +144,11 @@ class RawSignal:
 
         # Genero vector de tiempos en 1D  
         if times:
-            time_sec = start if start else 0
             muestras = data.shape[1]
+            offset_sec = self.first_samp / self.sfreq
 
-            time_vector = np.arange(muestras) / self.sfreq + time_sec  # Genero muestras uniformemente espaciadas y divido
-                                                                         # por freq (sumo tiempo en caso de inicio distinto de 0)
+            time_vector = np.arange(muestras) / self.sfreq + offset_sec  # Genero muestras uniformemente espaciadas y divido
+                                                                                    # por freq (sumo tiempo en caso de inicio distinto de 0)
 
             return data, time_vector
 
@@ -176,7 +213,7 @@ class RawSignal:
             data = np.delete(data, i, axis=0)
 
         newInfo = Info(ch_names=info_ch_names, ch_types=info_ch_types, sfreq=self.sfreq)
-        newRaw = RawSignal(data=data, info=newInfo, anotaciones=self.antoaciones, first_samp=self.first_samp)
+        newRaw = RawSignal(data=data, info=newInfo, anotaciones=self.anotaciones, first_samp=self.first_samp)
 
         if inplace:
             self.info = newInfo
@@ -199,9 +236,17 @@ class RawSignal:
         Raises:
             ValueError: Si tmin < 0, tmax > duración total o tmin >= tmax.
         """
+
+        if tmin is None:
+            begin = 0
+        else:
+            begin = int(tmin * self.sfreq)
+
         crop_data = self.get_data(start=tmin, stop=tmax)
 
-        return RawSignal(data=crop_data, sfreq=self.sfreq, info=self.info, anotaciones=self.antoaciones, first_samp=self.first_samp)
+        new_first_samp = self.first_samp + begin
+
+        return RawSignal(data=crop_data, sfreq=self.sfreq, info=self.info, anotaciones=self.anotaciones, first_samp=new_first_samp)
 
     def describe(self):
         pass
@@ -229,7 +274,7 @@ class RawSignal:
         """
         channels = self.get_data(picks=picks)
 
-        return RawSignal(data=channels, sfreq=self.sfreq, info=self.info, anotaciones=self.antoaciones, first_samp=self.first_samp)
+        return RawSignal(data=channels, sfreq=self.sfreq, info=self.info, anotaciones=self.anotaciones, first_samp=self.first_samp)
 
     def set_anotaciones(self, anotaciones):
         pass
