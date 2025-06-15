@@ -186,7 +186,19 @@ class RawSignal:
             return newRaw
 
     def crop(self, tmin, tmax) -> RawSignal:
+        """
+        Recorta la señal en un intervalo de tiempo especificado.
 
+        Args:
+            tmin: Tiempo de inicio en segundos (incluido).
+            tmax: Tiempo de fin en segundos (excluido).
+
+        Returns:
+            RawSignal: Nueva instancia con los datos recortados entre tmin y tmax.
+
+        Raises:
+            ValueError: Si tmin < 0, tmax > duración total o tmin >= tmax.
+        """
         crop_data = self.get_data(start=tmin, stop=tmax)
 
         return RawSignal(data=crop_data, sfreq=self.sfreq, info=self.info, anotaciones=self.antoaciones, first_samp=self.first_samp)
@@ -198,7 +210,26 @@ class RawSignal:
         pass
 
     def pick(self, picks) -> RawSignal:
-        pass
+        """
+        Selecciona y extrae un subconjunto de canales de la señal.
+
+        Args:
+            picks: Canal(es) a seleccionar. Puede especificarse como:
+                - str: nombre único de canal.
+                - int: índice de canal.
+                - list o tuple de str o int: múltiples canales.
+                - None: todos los canales.
+
+        Returns:
+            RawSignal: Nueva instancia que contiene únicamente los canales seleccionados.
+            
+        Raises:
+            TypeError: Si `picks` no es str, int, list o tuple.
+            ValueError: Si algún canal o índice no existe en `self.info.ch_names`.
+        """
+        channels = self.get_data(picks=picks)
+
+        return RawSignal(data=channels, sfreq=self.sfreq, info=self.info, anotaciones=self.antoaciones, first_samp=self.first_samp)
 
     def set_anotaciones(self, anotaciones):
         pass
