@@ -202,7 +202,17 @@ class Info:
         return [nombre for nombre, tipo in zip(self.ch_names, self.ch_types) if tipo == ch_type.lower()]
     
     def _select(self, select):
+        """
+        Filtra los canales disponibles conservando solo los especificados.
 
+        Args:
+            select: Nombre(s) de canal(es) a seleccionar. Puede ser un string individual
+                    o una lista/tupla de strings.
+
+        Returns:
+            None: Actualiza internamente la lista de nombres de canales (self.ch_names),
+                  manteniendo solo los especificados en el parámetro select.
+        """
         select = select if isinstance(select, (list, tuple)) else [select]
 
         channels = np.array(self.ch_names, dtype=str)
