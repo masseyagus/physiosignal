@@ -5,6 +5,7 @@ from physiosignal.info import Annotations
 from physiosignal.logger import log_config
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import logging
 
 class RawSignal:
@@ -140,11 +141,11 @@ class RawSignal:
 
         # Genero vector de tiempos en 1D  
         if times:
-            muestras = data.shape[1]
+            muestras = self.data.shape[1]
             offset_sec = self.first_samp / self.sfreq
 
             time_vector = np.arange(muestras) / self.sfreq + offset_sec  # Genero muestras uniformemente espaciadas y divido
-                                                                                    # por freq (sumo tiempo en caso de inicio distinto de 0)
+                                                                         # por freq (sumo tiempo en caso de inicio distinto de 0)
 
             return data, time_vector
 
@@ -244,10 +245,32 @@ class RawSignal:
 
         new_first_samp = self.first_samp + begin
 
+        # Actualizar anotaciones
+
         return RawSignal(data=crop_data, sfreq=self.sfreq, info=self.info, anotaciones=self.anotaciones, first_samp=new_first_samp)
 
-    def describe(self):
-        pass
+    def describe(self, channels:str|list):
+            
+        segment = self.pick(channels)
+        data = segment.data
+
+        if data.ndim == 1:
+            data = data[np.newaxis, :]
+
+        results = {}
+
+        for name, ch_data in zip(segment.info.ch_names, data):
+            results[name] = {
+                "min": float(np.min(ch_data)),
+                "Q1": float(np.percentile(ch_data, 25)),
+                "mediana": float(np.percentile(ch_data, 50)),
+                "Q3": float(np.percentile(ch_data, 75)),
+                "max": float(np.max(ch_data)),
+            }
+
+        # Crear DataFrame y transponer
+        df = pd.DataFrame(results)  # columnas → canales, filas → estadísticas
+        return df
 
     def filter(self, low_freq, high_freq, notch_freq, order) -> RawSignal:
         pass
@@ -270,7 +293,12 @@ class RawSignal:
             TypeError: Si `picks` no es str, int, list o tuple.
             ValueError: Si algún canal o índice no existe en `self.info.ch_names`.
         """
+        
+        # Obtengo la info de los canales (n_canales, n_muestras)
         channels = self.get_data(picks=picks)
+
+        # Actualizo los canales 
+        self.info._select(picks)
 
         return RawSignal(data=channels, sfreq=self.sfreq, info=self.info, anotaciones=self.anotaciones, first_samp=self.first_samp)
 
@@ -282,3 +310,15 @@ class RawSignal:
 
     def __getitem__(self): # [canal, muestras], si no hay devuelvo array vacío
         pass
+
+    def _getInfo(self):
+
+        dic = {"name":self.info.ch_names,
+               "type(s)":list(set(self.info.ch_types)),
+               "min":self.data.min(),
+               "Q1": np.percentile(self.data, q=25),
+               "mediana": np.median(self.data),
+               "Q3":np.percentile(self.data, q=75),
+               "max": self.data.max()}
+        
+        return dic
