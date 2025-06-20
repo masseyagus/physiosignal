@@ -7,12 +7,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import logging
 
-# Configuración global del logger
-log_config(see_log=True)
-
-logger = logging.getLogger(__name__)
-
-# Futura implementación
 class RawSignal:
     """
     Representa una señal de datos crudos (por ejemplo, EEG) junto con su
@@ -32,7 +26,8 @@ class RawSignal:
         Índice de la primera muestra de `data` respecto al inicio de la grabación
         original. 
     """
-    def __init__(self, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, first_samp:int=0):
+    def __init__(self, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
+                 first_samp:int=0, see_log:bool=True):
         """
         Inicializa una instancia de RawSignal.
 
@@ -59,6 +54,10 @@ class RawSignal:
         self.anotaciones = anotaciones # Objeto Annotations
         self.sfreq = self.info.sfreq if sfreq is None else sfreq
         self.first_samp = first_samp # Índice de la primera muestra
+
+        # Configuración inicial del logger
+        log_config(see_log)  
+        self._logger = logging.getLogger(__name__)
 
     def get_data(self, picks:str|np.array=None, start:float=None, stop:float=None, reject:float=None, times:bool=False):
         """
@@ -218,8 +217,10 @@ class RawSignal:
         if inplace:
             self.info = newInfo
             self.data = data
+            logging.info(f"Canales {ch_names} dropeados correctamente")
             return self
         else:
+            logging.info(f"Nueva instancia RawSignal sin los canales: {ch_names}")
             return newRaw
 
     def crop(self, tmin, tmax) -> RawSignal:
@@ -282,5 +283,5 @@ class RawSignal:
     def plot(self, picks, start, duration, show_anotaciones):
         pass  
 
-    def __getitem__(self):
+    def __getitem__(self): # [canal, muestras], si no hay devuelvo array vacío
         pass
