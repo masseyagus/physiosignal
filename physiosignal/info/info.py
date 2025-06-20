@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field, asdict
 from typing import Union, Dict, List
+import numpy as np
 
 @dataclass
 class Info:
@@ -199,3 +200,11 @@ class Info:
         """
 
         return [nombre for nombre, tipo in zip(self.ch_names, self.ch_types) if tipo == ch_type.lower()]
+    
+    def _select(self, select):
+
+        select = select if isinstance(select, (list, tuple)) else [select]
+
+        channels = np.array(self.ch_names, dtype=str)
+
+        self.ch_names = [str(ch) for ch in channels[np.isin(channels, select)]]
