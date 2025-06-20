@@ -31,23 +31,20 @@ class RawSignal:
         """
         Inicializa una instancia de RawSignal.
 
-        Parameters
-        ----------
-        data : np.ndarray, optional
-            Matriz con los datos de la señal, de forma (n_canales, n_muestras).
-            Por defecto None.
-        sfreq : float, optional
-            Frecuencia de muestreo en Hz. Si se omite (None), se toma de
-            `info.sfreq`. Por defecto None.
-        info : Info, optional
-            Objeto Info con metadatos de canales (nombres, tipos, etc.). Por
-            defecto None.
-        anotaciones : Annotations, optional
-            Objeto Annotations con las marcas de eventos o anotaciones temporales.
-            Por defecto None.
-        first_samp : int, optional
-            Índice de la primera muestra de `data` con respecto al inicio del
-            registro original (por defecto 0).
+        Args:
+            data : np.ndarray, optional
+                Matriz con los datos de la señal, de forma (n_canales, n_muestras). Por defecto None.
+            sfreq : float, optional
+                Frecuencia de muestreo en Hz. Si se omite (None), se toma de `info.sfreq`. Por defecto None.
+            info : Info, optional
+                Objeto Info con metadatos de canales (nombres, tipos, etc.). Por defecto None.
+            anotaciones : Annotations, optional
+                Objeto Annotations con las marcas de eventos o anotaciones temporales. Por defecto None.
+            first_samp : int, optional
+                Índice de la primera muestra de `data` con respecto al inicio del registro original. Por defecto 0.
+            see_log : bool, optional
+                Si es True, activa la salida de mensajes del sistema de logging con
+                nivel INFO. Si es False, suprime los mensajes. Por defecto True.
         """
         self.data = data # Matriz con forma (n_canales, n_muestras)
         self.info = info # Objeto Info
