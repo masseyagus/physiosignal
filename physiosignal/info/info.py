@@ -218,3 +218,4 @@ class Info:
         channels = np.array(self.ch_names, dtype=str)
 
         self.ch_names = [str(ch) for ch in channels[np.isin(channels, select)]]
+
