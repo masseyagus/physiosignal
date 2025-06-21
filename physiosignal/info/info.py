@@ -34,6 +34,11 @@ class Info:
         """
         Inicialización posterior para validar consistencia de datos.
         Convierte tipos de canal a formato lista cuando es necesario.
+
+        Actions:
+            1. Normaliza ch_types a lista si es string único
+            2. Verifica igual longitud de ch_names y ch_types
+            3. Valida sfreq > 0
         
         Raises:
             ValueError: Si hay discrepancia en cantidad de canales/tipos
@@ -131,6 +136,9 @@ class Info:
         Returns:
             Info: Instancia actualizada (permite method chaining)
 
+        Example:
+            >>> info.rename_channels({'Fp1': 'FP1', 'Fp2': 'FP2'})
+
         Raises:  
             ValueError: Si algún nombre antiguo no existe
                         Si se generan nombres duplicados
@@ -197,6 +205,11 @@ class Info:
 
         Returns:
             List[str]: Lista de nombres de canales que coinciden con el tipo
+
+        Example:
+            >>> canales_eeg = info.filter_by_type('eeg')
+            >>> print(canales_eeg)
+            ['Fp1', 'Fp2', 'C3', 'C4', ...]
         """
 
         return [nombre for nombre, tipo in zip(self.ch_names, self.ch_types) if tipo == ch_type.lower()]
@@ -206,14 +219,14 @@ class Info:
         Filtra los canales disponibles conservando solo los especificados.
 
         Args:
-            select: Nombre(s) de canal(es) a seleccionar. Puede ser un string individual
-                    o una lista/tupla de strings.
+            select: Nombre(s) de canal(es) a seleccionar. Puede ser un string individual,
+                    una lista/tupla o un np.ndarray de strings.
 
         Returns:
             None: Actualiza internamente la lista de nombres de canales (self.ch_names),
                   manteniendo solo los especificados en el parámetro select.
         """
-        select = select if isinstance(select, (list, tuple)) else [select]
+        select = select if isinstance(select, (list, tuple, np.ndarray)) else [select]
 
         channels = np.array(self.ch_names, dtype=str)
 
