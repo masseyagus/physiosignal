@@ -2,32 +2,42 @@ import numpy as np
 
 def _checking(onset, duration, description, ch_names):
     """
-    Valida y convierte los parámetros de anotación a arrays 1D consistentes.
-
-    Esta función asegura que todos los parámetros de entrada tengan dimensiones compatibles
-    y tipos apropiados para ser utilizados en la clase `Annotations`.
+    Valida y normaliza parámetros de anotaciones para garantizar consistencia interna.
 
     Args:
-        onset (float | array-like): Tiempo(s) de inicio de las anotaciones.
-        duration (float | array-like): Duración(es) de las anotaciones.
-        description (str | array-like): Descripción(es) asociada(s) a cada anotación.
-        ch_names (None | str | array-like): Nombre(s) de canal o lista de canales asociados.
-            Puede ser:
-                - None (se asigna como array de None),
-                - una cadena (para una sola anotación),
-                - una lista de cadenas,
-                - una lista de listas (se convierte a cadenas separadas por comas).
+        onset: Tiempo(s) de inicio. Tipos aceptados:
+            - float: un único tiempo
+            - list[float]: múltiples tiempos
+            - np.ndarray: array de tiempos
+        duration: Duración(es). Mismos tipos que onset.
+        description: Descripción(es). Tipos aceptados:
+            - str: descripción única
+            - list[str]: múltiples descripciones
+        ch_names: Canales asociados. Tipos aceptados:
+            - None: sin canales
+            - str: canal único para todas
+            - list: un elemento por anotación (str para un canal, lista para múltiples)
 
     Returns:
-        tuple: Cuádrupla de arrays 1D:
-            - onset (np.ndarray[float])
-            - duration (np.ndarray[float])
-            - description (np.ndarray[str])
-            - ch_names (np.ndarray[object])
+        tuple: (onset, duration, description, ch_names) como arrays 1D consistentes
 
     Raises:
-        ValueError: Si los arrays no son unidimensionales o tienen longitudes incompatibles.
-        TypeError: Si los valores no pueden convertirse a los tipos esperados.
+        ValueError: Si los parámetros tienen longitudes incompatibles
+        TypeError: Si los tipos de entrada no son convertibles al formato requerido
+
+    Example:
+        >>> _checking(
+        >>>     onset=[1.0, 2.5],
+        >>>     duration=0.5,
+        >>>     description=["Evento_A", "Evento_B"],
+        >>>     ch_names=["Fp1", ["Fp1", "Fp2"]]
+        >>> )
+        (
+            array([1.0, 2.5]),
+            array([0.5, 0.5]),
+            array(['Evento_A', 'Evento_B'], dtype='<U8'),
+            array([['Fp1'], ['Fp1','Fp2']], dtype=object)
+        )
     """
     onset = np.atleast_1d(np.array(onset, dtype=float))
     if onset.ndim != 1:
@@ -88,6 +98,7 @@ def _sort(self):
         - Usa `np.argsort` para obtener los índices de ordenamiento.
         - El ordenamiento garantiza que las anotaciones estén cronológicamente alineadas.
         - También reordena `ch_names` si no es None.
+        - Usado automáticamente al agregar nuevas anotaciones
     """
     orden = np.argsort(self.onset)
     self.onset = self.onset[orden]
