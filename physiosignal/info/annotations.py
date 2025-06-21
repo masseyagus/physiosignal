@@ -70,6 +70,14 @@ class Annotations:
         Returns:
             None: Modifica los atributos internos in-place
 
+        Example:
+            >>> anot.add(
+            >>>     onset=25.3,
+            >>>     duration=1.5,
+            >>>     description="Stimulus",
+            >>>     ch_names=["O1", "O2"]
+            >>> )
+
         Notes:
             - Realiza validación de formato idéntica al constructor
             - Considera duplicado solo si todos los campos (incluyendo canales) coinciden
@@ -119,6 +127,13 @@ class Annotations:
             duration (float | list | np.ndarray, opcional): Duración(es) a eliminar.
             description (str | list, opcional): Descripción(es) a eliminar.
             ch_names (str | list, opcional): Nombre(s) de canal asociado(s) a eliminar.
+
+        Example:
+            >>> # Eliminar todas las anotaciones en el tiempo 5.25
+            >>> anot.remove(onset=5.25)
+            >>>
+            >>> # Eliminar todos los artefactos
+            >>> anot.remove(description="Artifact")
 
         Notes:
             - El filtrado por criterios se hace de forma independiente (no se combinan con AND).
@@ -172,39 +187,20 @@ class Annotations:
                 - description: Descripciones textuales
                 - ch_names: Canales asociados (None o listas de strings)
 
+        Example:
+            >>> df = anot.get_annotations()
+            >>> print(df.head())
+               onset  duration description  ch_names
+            0   1.23      0.15       Blink       FP1
+            1   5.25      0.20    Artifact  [Fp1,Fp2]
+
         Notes:
-            - Ajusta automáticamente la columna ch_names para igualar el número de filas:
-                * Si hay más canales que anotaciones: agrupa los excedentes en la última fila
-                * Si hay menos canales que anotaciones: completa con None
-            - Mantiene la integridad de los datos originales en los atributos de la clase
-            - El DataFrame resultante es independiente de los datos internos
+            - Los arrays internos ya tienen la misma longitud gracias a la validación en el constructor
         """
-        info = self._getInfo()
-        on = info['onset']
-        du = info['duration']
-        de = info['description']
-        ch = info['ch_names']
-
-        n = len(on)
-        m = len(ch)
-
-        if m > n:
-            # Tomamos los primeros n-1 canales individuales,
-            # y relegamos todos los “extras” a la última posición como lista.
-            nuevos = []
-            for i in range(n - 1):
-                nuevos.append(ch[i])
-            # 'ch[n-1:]' es la lista de todos los canales restantes
-            nuevos.append(ch[n - 1 :])
-            info['ch_names'] = nuevos
-
-        elif m < n:
-            # Si hubiera menos canales que anotaciones,
-            # rellenamos por detrás con None para que iguale longitud n.
-            info['ch_names'] = ch + [None] * (n - m)
-
-        # Ahora len(info['ch_names']) == n y el DataFrame no dará error
-        return pd.DataFrame.from_dict(info, orient="columns")
+        return pd.DataFrame({'onset': self.onset,
+                             'duration': self.duration,
+                             'description': self.description,
+                             'ch_names': self.ch_names})
 
     def find(self, filtros:tuple|list):
         """
@@ -222,6 +218,13 @@ class Annotations:
 
         Raises:
             LookupError: Si no se encuentra la columna indicada o si no se hallan registros que coincidan con el filtro.
+
+        Example:
+            >>> # Buscar todas las anotaciones con onset=5.25
+            >>> anot.find((5.25, "onset"))
+            >>>
+            >>> # Buscar todos los eventos de tipo 'Blink'
+            >>> anot.find("Blink")
 
         Notes:
             - Si no se proporciona ningún filtro, se devuelve el DataFrame completo.
@@ -295,6 +298,11 @@ class Annotations:
             FileNotFoundError: Si el archivo especificado no existe.
             pd.errors.ParserError: Si el archivo CSV no tiene el formato correcto.
             KeyError: Si faltan las columnas obligatorias ('onset', 'duration' o 'description') en el CSV.
+
+        CSV Requirements:
+            - Columnas obligatorias: onset, duration, description
+            - Columna opcional: ch_names
+            - Formato: separado por comas, primera línea como cabecera
         """
         df = pd.read_csv(path)
 
