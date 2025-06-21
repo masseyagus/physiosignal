@@ -13,39 +13,54 @@ class RawSignal:
     Representa una señal de datos crudos (por ejemplo, EEG) junto con su
     información de muestreo, metadatos de canales y anotaciones de eventos.
 
-    Attributes
-    ----------
-    data : np.ndarray
-        Matriz de forma (n_canales, n_muestras) con los valores de la señal.
-    sfreq : float
-        Frecuencia de muestreo en Hz.
-    info : Info
-        Objeto Info que contiene metadatos de los canales (nombres, tipos, etc.).
-    anotaciones : Annotations
-        Objeto Annotations con las marcas de eventos o anotaciones temporales.
-    first_samp : int
-        Índice de la primera muestra de `data` respecto al inicio de la grabación
-        original. 
+    Key Features:
+        - Soporte para operaciones temporales (crop, segmentación)
+        - Manejo integrado de anotaciones
+        - Selección flexible de canales
+        - Filtrado por amplitud
+
+    Attributes:
+        data : np.ndarray
+            Matriz de forma (n_canales, n_muestras) con los valores de la señal.
+        sfreq : float
+            Frecuencia de muestreo en Hz.
+        info : Info
+            Objeto Info que contiene metadatos de los canales.
+        anotaciones : Annotations
+            Objeto con marcas de eventos temporales.
+        first_samp : int
+            Índice de la primera muestra respecto al inicio original.
+
+    Usage Examples:
+        >>> # Crear señal desde numpy array
+        >>> data = np.random.randn(64, 512*60)  # 64 canales, 1 minuto @512Hz
+        >>> info = Info(ch_names=canales, ch_types=['eeg']*64, sfreq=512)
+        >>> raw = RawSignal(data=data, info=info)
+        >>>
+        >>> # Recortar segmento
+        >>> segmento = raw.crop(tmin=10, tmax=30)  # 20 segundos
     """
     def __init__(self, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
                  first_samp:int=0, see_log:bool=True):
         """
         Inicializa una instancia de RawSignal.
 
-        Args:
+        Parameters:
             data : np.ndarray, optional
-                Matriz con los datos de la señal, de forma (n_canales, n_muestras). Por defecto None.
+                Matriz (n_canales, n_muestras)
             sfreq : float, optional
-                Frecuencia de muestreo en Hz. Si se omite (None), se toma de `info.sfreq`. Por defecto None.
+                Frecuencia de muestreo (obtenida de info si es None)
             info : Info, optional
-                Objeto Info con metadatos de canales (nombres, tipos, etc.). Por defecto None.
+                Metadatos de canales
             anotaciones : Annotations, optional
-                Objeto Annotations con las marcas de eventos o anotaciones temporales. Por defecto None.
+                Eventos temporales asociados
             first_samp : int, optional
-                Índice de la primera muestra de `data` con respecto al inicio del registro original. Por defecto 0.
+                Índice de primera muestra (default=0)
             see_log : bool, optional
-                Si es True, activa la salida de mensajes del sistema de logging con
-                nivel INFO. Si es False, suprime los mensajes. Por defecto True.
+                Activa/desactiva logs (default=True)
+
+        Implementation Notes:
+            - Si sfreq es None, se obtiene de info.sfreq
         """
         self.data = data # Matriz con forma (n_canales, n_muestras)
         self.info = info # Objeto Info
@@ -61,6 +76,11 @@ class RawSignal:
         """
         Extrae datos de señales con opciones de recorte temporal, filtrado por amplitud y selección de canales.
 
+        Processing Pipeline:
+            1. Filtrado por amplitud (si reject)
+            2. Recorte temporal (si start/stop)
+            3. Selección de canales (si picks)
+
         Args:
             picks: Canal(es) a seleccionar (nombre, índice o lista de ellos). Si None, se usan todos.
             start: Tiempo de inicio en segundos (None para iniciar desde el comienzo).
@@ -71,6 +91,15 @@ class RawSignal:
         Returns:
             data: Array con forma (n_canales, n_muestras) o (n_muestras,) si un solo canal.
             time_vector (opcional): Vector 1D de tiempos en segundos si times=True.
+
+        Usage Examples:
+            >>> # Extraer canales FP1-FP2 entre 10-20s con umbral 150μV
+            >>> datos = raw.get_data(
+            >>>     picks=['FP1','FP2'],
+            >>>     start=10,
+            >>>     stop=20,
+            >>>     reject=150
+            >>> )
 
         Notes:
             - Si se usa `reject`, se descartan canales cuya amplitud (máximo - mínimo) supere el umbral dado.
@@ -225,37 +254,90 @@ class RawSignal:
         """
         Recorta la señal en un intervalo de tiempo especificado.
 
+        Temporal Processing:
+            - Recorta señal y ajusta anotaciones al nuevo intervalo
+            - Normaliza tiempos relativos al nuevo inicio
+
         Args:
-            tmin: Tiempo de inicio en segundos (incluido).
-            tmax: Tiempo de fin en segundos (excluido).
+            tmin: Tiempo de inicio en segundos (incluido). Si None, usa 0.
+            tmax: Tiempo de fin en segundos (excluido). Si None, usa el final.
 
         Returns:
             RawSignal: Nueva instancia con los datos recortados entre tmin y tmax.
 
-        Raises:
-            ValueError: Si tmin < 0, tmax > duración total o tmin >= tmax.
+        Edge Cases:
+            - Si tmin > tmax: ValueError
+            - Si tmax excede duración: ajusta al final
+            - Anotaciones fuera del rango: eliminadas
+
+        Example:
+            >>> recortada = raw.crop(tmin=5, tmax=15)  # 10 segundos
+            >>> print(recortada.data.shape)
+            (n_canales, 5120)  # 10s * 512Hz
+
+        Notes:
+            - Las anotaciones se filtran para incluir solo aquellas cuyo onset
+              esté dentro del intervalo [tmin, tmax].
+            - Los onset de las anotaciones se ajustan restando tmin para que sean
+              relativos al nuevo inicio del segmento recortado.
+            - Las anotaciones que comienzan antes de tmin o después de tmax se descartan.
         """
-
-        if tmin is None:
-            begin = 0
-        else:
-            begin = int(tmin * self.sfreq)
-
         crop_data = self.get_data(start=tmin, stop=tmax)
 
-        new_first_samp = self.first_samp + begin
+        duration = self.data.shape[1]/self.sfreq
+        tmin = 0.0 if tmin is None else float(tmin)
+        tmax = duration if tmax is None else float(tmax)        
+        new_first_samp = self.first_samp + int(tmin * self.sfreq)
 
-        # Actualizar anotaciones
+        # Actualizo anotaciones
+        df = self.anotaciones.get_annotations()
 
-        return RawSignal(data=crop_data, sfreq=self.sfreq, info=self.info, anotaciones=self.anotaciones, first_samp=new_first_samp)
+        if df is not None and not df.empty:
+            mask = (df['onset'] >=tmin) & (df["onset"] <= tmax)
+            filtered = df[mask].copy()
+
+            filtered.loc[:, 'onset'] = filtered['onset'] - tmin
+
+        else:
+            filtered = df
+
+        onset = filtered["onset"]
+        duration = filtered['duration']
+        description = filtered['description']
+        ch_names = filtered['ch_names']
+
+        new_ann = Annotations(onset=onset, duration=duration, description=description, ch_names=ch_names)
+
+        return RawSignal(data=crop_data, sfreq=self.sfreq, info=self.info, anotaciones=new_ann, first_samp=new_first_samp)
 
     def describe(self, channels:str|list):
-            
+        """
+        Genera estadísticas descriptivas para los canales especificados.
+
+        Args:
+            channels: Nombre(s) de canal(es) para analizar.
+
+        Returns:
+            pd.DataFrame: DataFrame con estadísticas descriptivas (min, Q1, mediana, Q3, max)
+            para cada canal especificado.
+
+        Example Output:
+                   FP1       FP2
+            min    -125.32   -118.45
+            Q1      -15.21    -12.33
+            mediana   0.05      0.12
+            Q3       18.76     15.89
+            max     105.89     92.17
+
+        Notes:
+            - Las estadísticas se calculan sobre toda la duración de la señal.
+            - Para un solo canal, se devuelve un DataFrame con una columna.
+        """   
         segment = self.pick(channels)
         data = segment.data
 
         if data.ndim == 1:
-            data = data[np.newaxis, :]
+            data = data[np.newaxis, :] # np.newaxis, incrementa en 1 la dimensión, volviendo array 2D.
 
         results = {}
 
@@ -268,11 +350,25 @@ class RawSignal:
                 "max": float(np.max(ch_data)),
             }
 
-        # Crear DataFrame y transponer
         df = pd.DataFrame(results)  # columnas → canales, filas → estadísticas
         return df
 
     def filter(self, low_freq, high_freq, notch_freq, order) -> RawSignal:
+        """
+        Aplica filtrado a la señal (no implementado actualmente).
+
+        Args:
+            low_freq: Frecuencia de corte baja.
+            high_freq: Frecuencia de corte alta.
+            notch_freq: Frecuencia de filtro notch.
+            order: Orden del filtro.
+
+        Returns:
+            RawSignal: Nueva instancia con la señal filtrada.
+
+        Notes:
+            - Este método está pendiente de implementación.
+        """
         pass
 
     def pick(self, picks) -> RawSignal:
@@ -292,27 +388,70 @@ class RawSignal:
         Raises:
             TypeError: Si `picks` no es str, int, list o tuple.
             ValueError: Si algún canal o índice no existe en `self.info.ch_names`.
+
+        Notes:
+            - Actualiza la información de los canales en el objeto info.
         """
-        
+        from copy import deepcopy
         # Obtengo la info de los canales (n_canales, n_muestras)
         channels = self.get_data(picks=picks)
 
         # Actualizo los canales 
-        self.info._select(picks)
+        new_info = deepcopy(self.info)
+        new_info._select(picks)
 
-        return RawSignal(data=channels, sfreq=self.sfreq, info=self.info, anotaciones=self.anotaciones, first_samp=self.first_samp)
+        return RawSignal(data=channels, sfreq=self.sfreq, info=new_info, anotaciones=self.anotaciones, first_samp=self.first_samp)
 
     def set_anotaciones(self, anotaciones):
+        """
+        Establece las anotaciones para la señal (no implementado actualmente).
+
+        Args:
+            anotaciones: Objeto Annotations con las nuevas anotaciones.
+
+        Notes:
+            - Este método está pendiente de implementación.
+        """
         pass
 
     def plot(self, picks, start, duration, show_anotaciones):
+        """
+        Genera una visualización de la señal (no implementado actualmente).
+
+        Args:
+            picks: Canales a visualizar.
+            start: Tiempo de inicio para el plot.
+            duration: Duración del segmento a visualizar.
+            show_anotaciones: Si es True, muestra las anotaciones en el plot.
+
+        Notes:
+            - Este método está pendiente de implementación.
+        """
         pass  
 
     def __getitem__(self): # [canal, muestras], si no hay devuelvo array vacío
+        """
+        Permite el acceso por índices a los datos de la señal (no implementado actualmente).
+
+        Returns:
+            np.ndarray: Segmento solicitado de los datos.
+
+        Notes:
+            - Este método está pendiente de implementación.
+        """
         pass
 
     def _getInfo(self):
+        """
+        Genera información estadística sobre los datos (uso interno).
 
+        Returns:
+            dict: Diccionario con estadísticas descriptivas de la señal.
+
+        Notes:
+            - Método de uso interno, no diseñado para ser llamado directamente.
+            - Las estadísticas se calculan sobre todos los canales y muestras.
+        """
         dic = {"name":self.info.ch_names,
                "type(s)":list(set(self.info.ch_types)),
                "min":self.data.min(),
