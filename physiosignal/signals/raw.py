@@ -6,6 +6,7 @@ from physiosignal.logger import log_config
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import scipy.signal
 import logging
 
 class RawSignal:
@@ -109,14 +110,15 @@ class RawSignal:
         """
         duration = self.data.shape[1]/self.sfreq # Hallo la duración de la señal
 
-        # Chequeo tiempos y genero las muestras en caso dado
-        if start is not None and stop is not None:
+        start = 0.0 if start is None else float(start)
+        stop = duration if stop is None else float(stop) 
 
-            if start < 0 or stop < 0 or start > stop or stop > duration:
-                raise ValueError(f"Valores inválidos: start debe estar entre [0, {round(duration, 1)}], " 
-                                f"y stop no debe exceder {round(duration, 1)}")
+        # Chequeo tiempos y genero las muestras en caso dado
+        if start < 0 or stop < 0 or start > stop or stop > duration:
+            raise ValueError(f"Valores inválidos: start debe estar entre [0, {round(duration, 1)}], " 
+                            f"y stop no debe exceder {round(duration, 1)}")
             
-            begin, end = int(start * self.sfreq), int(stop * self.sfreq)
+        begin, end = int(start * self.sfreq), int(stop * self.sfreq)
         
         # Filtro por amplitud
         if reject is not None:
@@ -132,7 +134,7 @@ class RawSignal:
             data = self.data # Si no se solicita filtro, genero la variable data con toda la información
 
         # Aplico segmentación si se solicita
-        if start and stop:
+        if start is not None and stop is not None:
             data = data[:, begin:end]
         elif start:
             data = data[:, begin:]
@@ -250,7 +252,7 @@ class RawSignal:
             logging.info(f"Nueva instancia RawSignal sin los canales: {ch_names}")
             return newRaw
 
-    def crop(self, tmin, tmax) -> RawSignal:
+    def crop(self, tmin:int=None, tmax:int=None) -> RawSignal:
         """
         Recorta la señal en un intervalo de tiempo especificado.
 
@@ -353,7 +355,8 @@ class RawSignal:
         df = pd.DataFrame(results)  # columnas → canales, filas → estadísticas
         return df
 
-    def filter(self, low_freq, high_freq, notch_freq, order) -> RawSignal:
+    def filter(self, low_freq:float = 1, high_freq:float = 25, order:int = 4, 
+               notch_freq:float = 50.0, q:int = 30) -> RawSignal:
         """
         Aplica filtrado a la señal (no implementado actualmente).
 
@@ -369,7 +372,27 @@ class RawSignal:
         Notes:
             - Este método está pendiente de implementación.
         """
-        pass
+        if low_freq < 1 or low_freq >= high_freq:
+            raise ValueError(f"low_freq debe ser mayor o igual a 1, y menor a high_freq")
+
+        # Vector de tiempo para gráficas
+        n_samps = self.data.shape[1]
+        t = np.arange(n_samps) / self.sfreq
+
+        # Obtengo los coeficientes del filtro notch
+        b_notch, a_notch = scipy.signal.iirnotch(notch_freq, q, self.sfreq)
+
+        # Aplico el filtro notch a la señal
+        notch_signal = scipy.signal.filtfilt(b_notch, a_notch, self.data, axis=-1)
+
+        # Design the bandpass filter
+        b_butter, a_butter = scipy.signal.butter(order, [low_freq, high_freq], btype='band', fs=self.sfreq)
+
+        # Aplico el filtro Butterworth a la señal filtrada
+        filtered_signal = scipy.signal.filtfilt(b_butter, a_butter, notch_signal, axis=-1)
+
+        # Devuelvo nuevo objeto con señal filtrada
+        return RawSignal(data=filtered_signal, sfreq=self.sfreq, info=self.info, anotaciones=self.anotaciones, first_samp=self.first_samp)
 
     def pick(self, picks) -> RawSignal:
         """
@@ -428,6 +451,60 @@ class RawSignal:
             - Este método está pendiente de implementación.
         """
         pass  
+    
+    def plot_filtered(self, filtered_signal):
+
+        n_samps = self.data.shape[1]
+        t = np.arange(n_samps) / self.sfreq
+
+        # Graficamos la señal original y la señal filtrada
+        plt.figure(figsize=(12, 6))
+        plt.subplot(2, 1, 1)
+        plt.plot(t, self.data[0,:], label='Señal Original', color='blue')
+        plt.title('Señal Original')
+        plt.xlabel('Tiempo (s)')
+        plt.ylabel('Amplitud')
+        plt.ylim(-200, 200)
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.legend()
+
+        plt.subplot(2, 1, 2)
+        plt.plot(t, filtered_signal[0,:], label='Señal Filtrada', color='red')
+        plt.title('Señal Filtrada')
+        plt.xlabel('Tiempo (s)')
+        plt.ylabel('Amplitud')
+        plt.legend()
+        plt.tight_layout()
+        plt.ylim(-200, 200)
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.show()
+
+    def plot_spectrum(self, filtered_signal, low_freq, high_freq, notch_freq):
+
+        f_orig, psd_orig = scipy.signal.welch(self.data, fs=self.sfreq, nperseg=1024, axis=-1)
+        f_filt, psd_filt = scipy.signal.welch(filtered_signal, fs=self.sfreq, nperseg=1024, axis=-1)
+
+        # Convertir a dB (con referencia estándar de 1 μV²/Hz)
+        psd_orig_db = np.log10(psd_orig)  # dB re: 1 μV²/Hz
+        psd_filt_db = np.log10(psd_filt)  # dB re: 1 μV²/Hz
+
+        # Grafico
+        plt.figure(figsize=(12, 6))
+        plt.plot(f_orig, psd_orig_db[0,:], 'b', label='Espectro Original')
+        plt.plot(f_filt, psd_filt_db[0,:], 'r', label='Espectro Filtrado')
+
+        # Añadir líneas de referencia para los filtros
+        plt.axvline(low_freq, color="#288603FF", linestyle='--', alpha=0.7, label=f'LPF {low_freq}Hz')
+        plt.axvline(high_freq, color='#288603FF', linestyle='--', alpha=0.7, label=f'HPF {high_freq}Hz')
+        plt.axvline(notch_freq, color="#D400FFEB", linestyle='--', alpha=0.7, label=f'Notch {notch_freq}Hz')
+
+        plt.title('Densidad Espectral de Potencia')
+        plt.xlabel('Frecuencia (Hz)')
+        plt.ylabel('PSD (dB)')
+        plt.legend()
+        plt.grid(True, which='both', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.show()
 
     def __getitem__(self): # [canal, muestras], si no hay devuelvo array vacío
         """
@@ -461,3 +538,7 @@ class RawSignal:
                "max": self.data.max()}
         
         return dic
+
+
+
+    
