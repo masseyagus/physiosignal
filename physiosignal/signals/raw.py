@@ -498,6 +498,7 @@ class RawSignal:
         from PyQt5.QtWidgets import (QApplication, QMainWindow, 
                                     QScrollArea, QVBoxLayout, QWidget, QDesktopWidget)
         from PyQt5.QtCore import Qt
+        from PyQt5.QtWidgets import QLabel, QHBoxLayout
         import itertools
 
         # 1. Configuración inicial de datos
@@ -509,74 +510,76 @@ class RawSignal:
         n_chan, n_samp = data.shape
 
         # 2. Manejo de anotaciones
-        ann_df = self.anotaciones.get_annotations()
-        mask = (ann_df['onset'] >= start) & (ann_df['onset'] <= stop)
-        ann_filtered = ann_df.loc[mask]
-        ann_rel = (ann_filtered['onset'] - start).values
-        ann_desc = ann_filtered['description'].values
+        ann_df = self.anotaciones.get_annotations() # Obtengo el DataFrame de anotaciones
+        mask = (ann_df['onset'] >= start) & (ann_df['onset'] <= stop) # Máscara booleana dentro del intervalo
+        ann_filtered = ann_df.loc[mask] # Filtro el DataFrame
+        ann_rel = (ann_filtered['onset'] - start).values # Calculo tiempos relativos de cada anotación
+        ann_desc = ann_filtered['description'].values # Obtengo las descripciones del DataFrame filtrado
         
-        colores_disponibles = ["#FF0000", "#9000FF", "#0000FF", "#FFA500", "#800080"]
-        color_cycle = itertools.cycle(colores_disponibles)
-        descripciones_unicas = np.unique(ann_desc)
-        color_dict = {desc: next(color_cycle) for desc in descripciones_unicas}
+        colores_disponibles = ["#FF0000", "#9000FF", "#0000FF", "#FFA500", "#800080"] # Plantilla de colores
+        color_cycle = itertools.cycle(colores_disponibles) # Creo secuencia infinita del iterable dado
+        descripciones_unicas = np.unique(ann_desc) # Elimino descripciones repetidas
+        color_dict = {desc: next(color_cycle) for desc in descripciones_unicas} # A cada descripción le asigno un color del iterable
 
         # 3. Configuración de la interfaz gráfica
-        app = QApplication.instance() or QApplication(sys.argv)
-        main_win = QMainWindow()
-        main_win.setWindowTitle(f"Visualizador de Señales - {self.__class__.__name__}")
+        app = QApplication.instance() or QApplication(sys.argv) # Genero la instancia de QApplication o uso la existente
+        main_win = QMainWindow() # Creo la ventana principal de la app
+        main_win.setWindowTitle(f"Visualizador de Señales - {self.__class__.__name__}") # Asigno nombre a la ventana usando el nombre de la clase
         
         # Obtener tamaño de pantalla disponible
-        screen = QDesktopWidget().availableGeometry()
-        screen_width = screen.width()
-        screen_height = screen.height()
+        screen = QDesktopWidget().availableGeometry() # Halla el espacio utilizable de mi pantalla (objeto QRect)
+        screen_width = screen.width() # Obtengo el ancho útil de la pantalla
+        screen_height = screen.height() # Obtengo la altura útil de la pantalla
 
         # Calcular dimensiones de ventana basadas en número de canales
-        BASE_HEIGHT_PER_CHANNEL = 180  # Altura base por canal
-        MIN_WINDOW_HEIGHT = 300        # Altura mínima de ventana
-        MAX_WINDOW_HEIGHT = int(screen_height * 0.9)  # Máximo 90% de pantalla
+        BASE_HEIGHT_PER_CHANNEL = 180  # Asigno la altura base con la que se muestra cada canal
+        MIN_WINDOW_HEIGHT = 300        # Altura mínima que tiene la ventana que abre Qt
+        MAX_WINDOW_HEIGHT = int(screen_height * 0.9)  # Limito la altura a un 90% útil de la pantalla
         
-        # Calcular altura de ventana
+        # Calculo altura de la ventana Qt
         window_height = min(
             n_chan * BASE_HEIGHT_PER_CHANNEL + 100,  # Base + espacio extra
             MAX_WINDOW_HEIGHT
         )
-        window_height = max(window_height, MIN_WINDOW_HEIGHT)
+        window_height = max(window_height, MIN_WINDOW_HEIGHT) # Si la altura es muy chica, tomo el mínimo
         
         # Establecer tamaño de ventana
-        main_win.resize(1200, window_height)
+        main_win.resize(1200, window_height) # 1200 px de altura y ancho de px calculados
 
         # Configurar fondo blanco global para PyQtGraph
-        pg.setConfigOption('background', 'w')
-        pg.setConfigOption('foreground', 'k')  # Elementos en negro por defecto
+        pg.setConfigOption('background', 'w') # Aplico fondo blanco a todo
+        pg.setConfigOption('foreground', 'k')  # Aplico negro a texto, ejes y líneas
 
         # Widget central con área de scroll
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        scroll.setStyleSheet("background-color: black;")  # Fondo negro para el scroll
+        scroll = QScrollArea() # Creo la barra de scroll
+        scroll.setWidgetResizable(True) # Permito que la barra se pueda redimensionar
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn) # Fuerzo a que la barra vertical siempre se visualice
+        scroll.setStyleSheet("background-color: black;")  # Asigno color a la barra
         
         # Contenedor para los canales
-        container = QWidget()
-        container.setStyleSheet("background-color: white;")
-        container_layout = QVBoxLayout(container)
-        container_layout.setAlignment(Qt.AlignTop)
-        container_layout.setSpacing(5)  # Reducir espaciado entre gráficos
+        container = QWidget() # Creo un Widget para que contenga a los gráficos
+        container.setStyleSheet("background-color: white;") # Aplico fondo blanco al Widget
+        container_layout = QVBoxLayout(container) # Organiza los Widgets en vertical (un canal debajo del otro)
+        container_layout.setAlignment(Qt.AlignTop) # Alinea todos los elementos
+        container_layout.setSpacing(5)  # Establezco el espaciado entre canales o gráficas
         
         # 4. Parámetros visuales ajustables
         # Calcular altura por canal basada en número de canales
-        MIN_CHANNEL_HEIGHT = 100
-        MAX_CHANNEL_HEIGHT = 300
+        MIN_CHANNEL_HEIGHT = 100 # Altura mínima del gráfico para cada canal
+        MAX_CHANNEL_HEIGHT = 300 # Altura máxima del gráfico para cada canal
         
         if n_chan <= 4:
+            # Para pocos canales, calculo dinámicamente la altura de cada canal
             CHANNEL_HEIGHT = min(MAX_CHANNEL_HEIGHT, int(window_height / n_chan * 0.8))
         else:
+            # Para varios canales, tomo el mínimo de altura
             CHANNEL_HEIGHT = MIN_CHANNEL_HEIGHT
             
-        # Asegurar altura mínima y máxima
+        # Asegurar altura mínima y máxima. Du´plico código para evitar errores de visualización
         CHANNEL_HEIGHT = max(CHANNEL_HEIGHT, MIN_CHANNEL_HEIGHT)
         CHANNEL_HEIGHT = min(CHANNEL_HEIGHT, MAX_CHANNEL_HEIGHT)
         
-        SPACING = 5  # Espacio reducido entre canales
+        SPACING = 5  # Espacio entre canales. 
 
         # 5. Función para determinar límites Y inteligentes
         def get_ylimits(signal, ch_type):
@@ -598,11 +601,11 @@ class RawSignal:
                 'eog': (-500, 500), # μV
             }
             
-            # Usar rango predefinido si el tipo es conocido
+            # Uso rango predefinido si el tipo es conocido
             if ch_type in type_ranges:
                 return type_ranges[ch_type]
             
-            # Para tipos desconocidos: usar percentiles 1 y 99 con padding
+            # Para tipos desconocidos: uso percentiles 1 y 99 con padding
             p1 = np.percentile(signal, 1)
             p99 = np.percentile(signal, 99)
             padding = 0.3 * (p99 - p1)  # 30% de padding
@@ -614,102 +617,100 @@ class RawSignal:
             return (p1 - padding, p99 + padding)
 
         # 6. Crear gráfico para cada canal con escalado inteligente
+        # Itero sobre cada canal
         for idx in range(n_chan):
-            # Obtener tipo de canal (si está disponible)
+            # Obtengo el tipo de canal (si está disponible)
             ch_type = self.info.ch_types[idx].lower() if idx < len(self.info.ch_types) else 'unknown'
             
             # Widget para cada canal
-            channel_widget = pg.PlotWidget()
-            channel_widget.setBackground('w')  # Fondo blanco
+            channel_widget = pg.PlotWidget() # Creo un widget para contener al canal
+            channel_widget.setBackground('w')  # Le aplico fondo blanco
             
             # Configurar colores de ejes
-            channel_widget.getAxis('left').setPen(pg.mkPen('k'))
-            channel_widget.getAxis('bottom').setPen(pg.mkPen('k'))
+            channel_widget.getAxis('left').setPen(pg.mkPen('k')) # Coloreo en negro el eje izquirdo (Eje Y)
+            channel_widget.getAxis('bottom').setPen(pg.mkPen('k')) # Coloreo en negro el eje debajo (Eje X)
 
-            # Altura dinámica para el widget
-            channel_widget.setMinimumHeight(CHANNEL_HEIGHT)
-            channel_widget.setMaximumHeight(CHANNEL_HEIGHT)
+            # Defino la altura para ese canal en específico
+            channel_widget.setMinimumHeight(CHANNEL_HEIGHT) # Altura mínima
+            channel_widget.setMaximumHeight(CHANNEL_HEIGHT) # Altura máxima
             
-            # Graficar señal
+            # Grafico la señal
             plot_item = channel_widget.plot(times, data[idx, :], 
-                            pen=pg.mkPen("#1f77b4", width=1.5))
+                            pen=pg.mkPen("#1f77b4", width=1.5)) # Pen especifica el trazado de la línea
             
             # Configuración de ejes
             channel_widget.setLabel('left', self.info.ch_names[idx], 
-                                **{'color': 'k', 'font-size': '10pt'})
+                                **{'color': 'k', 'font-size': '12pt',
+                                   'font-family':'Times New Roman'}) # Configuro el nombre del eje de ese canal y su formato
             
-            # Configurar límites Y adaptativos
+            # Configurar límites Y adaptativos (uso función get_ylimits())
             y_min, y_max = get_ylimits(data[idx, :], ch_type)
             channel_widget.setYRange(y_min, y_max)
             
             # Mostrar solo el eje X en el último canal
-            if idx == n_chan - 1:
-                channel_widget.setLabel('bottom', 'Tiempo (s)', color='k')
-                channel_widget.showAxis('bottom')
+            if idx == n_chan - 1: # Verifico que sea la última gráfica (último canal)
+                # Personalizo el eje, selecciono color y texto
+                channel_widget.setLabel('bottom', 'Tiempo (s)', **{'color':'k', 'font-size':'12pt', 
+                                                                   'font-family':'Times New Roman',
+                                                                   'font-style': 'italic'})
+                channel_widget.showAxis('bottom') # Muestro el eje
             else:
-                channel_widget.hideAxis('bottom')
+                channel_widget.hideAxis('bottom') # Si no es el úlltimo canal, lo oculto
             
             # Añadir anotaciones
             if show_anotaciones:
-                for onset_rel, desc in zip(ann_rel, ann_desc):
-                    color = color_dict[desc]
+                for onset_rel, desc in zip(ann_rel, ann_desc): 
+                    color = color_dict[desc] # Obtengo el color asignado a al descripción
+                    # Creo una línea vertical infinita con vline para la anotación
                     vline = pg.InfiniteLine(
-                        pos=onset_rel,
-                        angle=90,
-                        pen=pg.mkPen(color, style=pg.QtCore.Qt.DashLine, width=1.5)
+                        pos=onset_rel, #La posiciono en el tiempo relativo
+                        angle=90, # Ángulo de la línea (vertical)
+                        pen=pg.mkPen(color, style=pg.QtCore.Qt.DashLine, width=1.5) # Indico grosor y 
+                                                                                    # color de línea (mismo que su descripción)
                     )
-                    channel_widget.addItem(vline)
+                    channel_widget.addItem(vline) # Añado la línea al gráfico del canal
             
-            # Añadir al layout principal
+            # Añado el gráfico al layut vertical
             container_layout.addWidget(channel_widget)
 
-        # 7. Leyenda (solo si hay anotaciones)
+        # 7. Leyenda (solo si se muestran anotaciones y hay eventos)
         if show_anotaciones and len(color_dict) > 0:
-            # Crear un widget contenedor para la leyenda
-            legend_container = QWidget()
-            legend_container.setStyleSheet("background-color: white;")
-            legend_layout = QVBoxLayout(legend_container)
-            legend_layout.setContentsMargins(10, 10, 10, 10)
-            
-            # Crear un PlotWidget solo como contenedor
-            legend_plot = pg.PlotWidget()
-            legend_plot.setBackground('w')
-            legend_plot.hideAxis('left')
-            legend_plot.hideAxis('bottom')
-            legend_plot.setFixedHeight(30 * len(color_dict))  # Altura dinámica
-            
-            # Ajustar el tamaño del área de la leyenda
-            legend_plot.setMinimumWidth(400)
-            
-            # Crear la leyenda
-            legend = pg.LegendItem(offset=(10, 10), 
-                                 horSpacing=20, 
-                                 verSpacing=10,
-                                 pen=pg.mkPen('k'))
-            legend.setParentItem(legend_plot.getPlotItem())
-            legend.setBrush(pg.mkBrush(255, 255, 255, 200))  # Fondo blanco semi-transparente
+            legend_container = QWidget() # Creo un widget que contenga a la leyenga (legend())
+            legend_container.setStyleSheet("background-color: white;") # Indico el color de fondo
+
+            hbox = QHBoxLayout(legend_container) # Creo un layout horizontal asociado al widget legend_container
+            hbox.setContentsMargins(10,10,10,10) # Ajusto los márgenes interiores
+            hbox.setSpacing(15)  # Espacio de 15 px entre cada widget
             
             # Añadir todos los ítems de la leyenda
-            for desc, color in color_dict.items():
-                dummy = pg.PlotDataItem(pen=pg.mkPen(color, width=3, 
-                                                   style=pg.QtCore.Qt.DashLine))
-                legend.addItem(dummy, desc)
+            for desc, color in color_dict.items(): # Recorro cada descripción y su color asignado
+                # un rectángulo de color
+                color_rect = QLabel() # Creo un widget vacío
+                color_rect.setFixedSize(20, 10) # Asigno tamaño a QLabel
+                color_rect.setStyleSheet(f"background-color: {color}; border: 1px solid black;") # Aplico estilo, color y grosor
+                # la etiqueta de texto
+                text_lbl = QLabel(desc) # Creo otro widget para el texto
+                text_lbl.setStyleSheet("color: black;") # Aplico color negro al texto
+                hbox.addWidget(color_rect) # Añado el color del rectángulo al layout
+                hbox.addWidget(text_lbl) # Añado el texto al lado del widget con el color
             
             # Añadir al layout
-            legend_layout.addWidget(legend_plot)
-            container_layout.addWidget(legend_container)
+            container_layout.addWidget(legend_container) # Añado todo al layout principal (el que contiene los canales)
+            hbox.setAlignment(Qt.AlignLeft)
+        
 
         # 8. Configuración final del scroll
         scroll.setWidget(container)
         main_win.setCentralWidget(scroll)
-        main_win.show()
+        main_win.show() # Muestro la ventana en pantalla
         
         # 9. Ajustar tamaño del contenedor
-        legend_height = 60 if (show_anotaciones and len(color_dict) > 0) else 0
-        total_height = n_chan * CHANNEL_HEIGHT + legend_height + (n_chan * SPACING)
-        container.setMinimumHeight(total_height)
+        legend_height = 60 if (show_anotaciones and len(color_dict) > 0) else 0 # Estimo la altura de la leyenda
+        total_height = n_chan * CHANNEL_HEIGHT + legend_height + (n_chan * SPACING) # Calculo la altura total del contenedor de leyenda
+        container.setMinimumHeight(total_height) # Ajusto el contenedor si el contenido excede el alto
         
-        sys.exit(app.exec_())
+        # Ejecuto la ventana y cierro al cerrar la ventana
+        sys.exit(app.exec_()) 
     
     def plot_filtered(self, filtered_signal):
         """
@@ -747,7 +748,7 @@ class RawSignal:
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.show()
 
-    def plot_spectrum(self, filtered_signal, low_freq, high_freq, notch_freq):
+    def plot_spectrum(self, filtered_signal, low_freq, high_freq, notch_freq, ch_idx):
         """
         [Método interno] Grafica comparación de espectros antes/después de filtrar.
 
@@ -756,6 +757,7 @@ class RawSignal:
             low_freq: Frecuencia de corte inferior usada en filtrado.
             high_freq: Frecuencia de corte superior usada en filtrado.
             notch_freq: Frecuencia de notch usada en filtrado.
+            ch_idx: Índice del canal que se quiere mostrar.
 
         Notes:
             - Convierte PSD a escala dB (referencia: 1 μV²/Hz)
@@ -771,8 +773,8 @@ class RawSignal:
 
         # Grafico
         plt.figure(figsize=(12, 6))
-        plt.plot(f_orig, psd_orig_db[0,:], 'b', label='Espectro Original')
-        plt.plot(f_filt, psd_filt_db[0,:], 'r', label='Espectro Filtrado')
+        plt.plot(f_orig, psd_orig_db[ch_idx,:], 'b', label='Espectro Original')
+        plt.plot(f_filt, psd_filt_db[ch_idx,:], 'r', label='Espectro Filtrado')
 
         # Añadir líneas de referencia para los filtros
         plt.axvline(low_freq, color="#288603FF", linestyle='--', alpha=0.7, label=f'LPF {low_freq}Hz')
