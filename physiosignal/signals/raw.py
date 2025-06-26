@@ -553,7 +553,7 @@ class RawSignal:
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
-        scroll.setStyleSheet("background-color: black;")  # Fondo blanco para el scroll
+        scroll.setStyleSheet("background-color: black;")  # Fondo negro para el scroll
         
         # Contenedor para los canales
         container = QWidget()
