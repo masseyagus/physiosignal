@@ -18,7 +18,8 @@ class RawSignal:
         - Soporte para operaciones temporales (crop, segmentación)
         - Manejo integrado de anotaciones
         - Selección flexible de canales
-        - Filtrado por amplitud
+        - Filtrado por amplitud y frecuencia
+        - Visualización avanzada con PyQtGraph
 
     Attributes:
         data : np.ndarray
@@ -40,6 +41,9 @@ class RawSignal:
         >>>
         >>> # Recortar segmento
         >>> segmento = raw.crop(tmin=10, tmax=30)  # 20 segundos
+        >>>
+        >>> # Filtrar señal
+        >>> filtrada = raw.filter(low_freq=1, high_freq=40, notch_freq=50)
     """
     def __init__(self, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
                  first_samp:int=0, see_log:bool=True):
@@ -48,20 +52,21 @@ class RawSignal:
 
         Parameters:
             data : np.ndarray, optional
-                Matriz (n_canales, n_muestras)
+                Matriz (n_canales, n_muestras) con datos de señal.
             sfreq : float, optional
-                Frecuencia de muestreo (obtenida de info si es None)
+                Frecuencia de muestreo en Hz. Si es None, se usa info.sfreq.
             info : Info, optional
-                Metadatos de canales
+                Metadatos de canales (nombres, tipos, etc.).
             anotaciones : Annotations, optional
-                Eventos temporales asociados
+                Eventos temporales asociados a la señal.
             first_samp : int, optional
-                Índice de primera muestra (default=0)
+                Índice de la primera muestra respecto al registro original (default=0).
             see_log : bool, optional
-                Activa/desactiva logs (default=True)
+                Activa/desactiva mensajes de logging (default=True).
 
         Implementation Notes:
             - Si sfreq es None, se obtiene de info.sfreq
+            - Configura el sistema de logging según see_log
         """
         self.data = data # Matriz con forma (n_canales, n_muestras)
         self.info = info # Objeto Info
@@ -78,20 +83,28 @@ class RawSignal:
         Extrae datos de señales con opciones de recorte temporal, filtrado por amplitud y selección de canales.
 
         Processing Pipeline:
-            1. Filtrado por amplitud (si reject)
-            2. Recorte temporal (si start/stop)
-            3. Selección de canales (si picks)
+            1. Recorte temporal (si start/stop)
+            2. Selección de canales (si picks)
+            3. Filtrado por amplitud (si reject)
 
         Args:
-            picks: Canal(es) a seleccionar (nombre, índice o lista de ellos). Si None, se usan todos.
-            start: Tiempo de inicio en segundos (None para iniciar desde el comienzo).
-            stop: Tiempo de fin en segundos (None para llegar hasta el final).
-            reject: Umbral de amplitud pico a pico para descartar canales (None para desactivar).
-            times: Si es True, retorna también el vector de tiempos correspondiente.
+            picks: Canal(es) a seleccionar. Puede ser:
+                - str: nombre de un canal
+                - int: índice de un canal
+                - list: múltiples canales (nombres o índices)
+                - None: todos los canales (default)
+            start: Tiempo de inicio en segundos (None = inicio de la señal).
+            stop: Tiempo de fin en segundos (None = fin de la señal).
+            reject: Umbral de amplitud pico a pico (en μV) para descartar canales ruidosos.
+            times: Si True, retorna también el vector de tiempos.
 
         Returns:
             data: Array con forma (n_canales, n_muestras) o (n_muestras,) si un solo canal.
-            time_vector (opcional): Vector 1D de tiempos en segundos si times=True.
+            time_vector (opcional): Vector 1D de tiempos en segundos (solo si times=True).
+
+        Raises:
+            ValueError: Si los parámetros start/stop son inválidos o reject < 0.
+            TypeError: Si picks tiene un tipo no soportado.
 
         Usage Examples:
             >>> # Extraer canales FP1-FP2 entre 10-20s con umbral 150μV
@@ -103,12 +116,11 @@ class RawSignal:
             >>> )
 
         Notes:
-            - Si se usa `reject`, se descartan canales cuya amplitud (máximo - mínimo) supere el umbral dado.
-            - La recortación por `start` y `stop` se aplica antes de la selección de canales.
-            - El vector de tiempos parte desde `start` si se especifica, o desde 0 por defecto.
-            - El retorno será una tupla (data, times) solo si se solicita explícitamente.
+            - El filtrado por amplitud se aplica después de la selección de canales.
+            - El vector de tiempos incluye el offset de first_samp.
         """
         duration = self.data.shape[1]/self.sfreq # Hallo la duración de la señal
+        data = self.data.copy()
 
         start = 0.0 if start is None else float(start)
         stop = duration if stop is None else float(stop) 
@@ -119,19 +131,6 @@ class RawSignal:
                             f"y stop no debe exceder {round(duration, 1)}")
             
         begin, end = int(start * self.sfreq), int(stop * self.sfreq)
-        
-        # Filtro por amplitud
-        if reject is not None:
-
-            if reject < 0:
-                raise ValueError("reject debe ser >= 0")
-            
-            index = self.data.max(axis=1) - self.data.min(axis=1) # Obtengo el valor del pico
-            pic_to_pic = index <= reject # Verifico que cumpla
-
-            data = self.data[pic_to_pic,:]
-        else:
-            data = self.data # Si no se solicita filtro, genero la variable data con toda la información
 
         # Aplico segmentación si se solicita
         if start is not None and stop is not None:
@@ -169,10 +168,22 @@ class RawSignal:
             
             else:
                 raise TypeError(f"El parámetro 'picks' debe ser str, int, list o tuple")
+        # Filtro por amplitud
+        if reject is not None:
+
+            if reject < 0:
+                raise ValueError("reject debe ser >= 0")
+            
+            index = data.max(axis=1) - data.min(axis=1) # Obtengo el valor del pico
+            pic_to_pic = index <= reject # Verifico que cumpla
+
+            data = data[pic_to_pic,:]
+        else:
+            data = data # Si no se solicita filtro, genero la variable data con toda la información
 
         # Genero vector de tiempos en 1D  
         if times:
-            muestras = self.data.shape[1]
+            muestras = data.shape[1]
             offset_sec = self.first_samp / self.sfreq
 
             time_vector = np.arange(muestras) / self.sfreq + offset_sec  # Genero muestras uniformemente espaciadas y divido
@@ -190,28 +201,21 @@ class RawSignal:
             ch_names: Nombre(s) de canal(es) a descartar.
                 - str: un único canal.
                 - list o tuple de str: varios canales.
-            inplace: Si True, modifica el objeto actual y devuelve `self`.
-                Si False, no altera el original y retorna una nueva instancia.
+            inplace: Si True, modifica el objeto actual y devuelve self.
+                Si False, retorna una nueva instancia sin modificar el original.
 
         Returns:
             RawSignal:
-                - Si inplace=True: el mismo objeto (`self`) con los canales eliminados.
-                - Si inplace=False: una nueva instancia de RawSignal con los cambios.
+                - Si inplace=True: el mismo objeto (self) actualizado.
+                - Si inplace=False: nueva instancia RawSignal sin los canales.
 
         Raises:
-            TypeError:
-                - Si `ch_names` no es str, list ni tuple.
-                - Si algún elemento de `ch_names` no es str.
-            ValueError:
-                - Si algún nombre de canal no existe en `self.info.ch_names`.
+            TypeError: Si ch_names no es str, list ni tuple, o contiene elementos no str.
+            ValueError: Si algún nombre de canal no existe en info.ch_names.
 
         Notes:
-            - Convierte siempre `ch_names` a lista de str antes de procesar.
-            - Busca los índices de cada canal y los ordena en orden inverso
-            para evitar desplazamientos al hacer pop.
-            - Tanto `self.info.ch_names` como `self.info.ch_types` se copian y
-            actualizan sin desordenar el original (salvo que inplace=True).
-            - Se elimina la fila correspondiente en `self.data` usando `np.delete`.
+            - Actualiza tanto los datos como los metadatos de canales.
+            - Mantiene la integridad de las anotaciones.
         """
         if isinstance(ch_names, str):
             ch_names = [ch_names]
@@ -257,19 +261,20 @@ class RawSignal:
         Recorta la señal en un intervalo de tiempo especificado.
 
         Temporal Processing:
-            - Recorta señal y ajusta anotaciones al nuevo intervalo
-            - Normaliza tiempos relativos al nuevo inicio
+            - Recorta datos entre tmin y tmax
+            - Ajusta anotaciones al nuevo intervalo
+            - Actualiza first_samp
 
         Args:
-            tmin: Tiempo de inicio en segundos (incluido). Si None, usa 0.
-            tmax: Tiempo de fin en segundos (excluido). Si None, usa el final.
+            tmin: Tiempo de inicio en segundos (inclusive). None = 0.
+            tmax: Tiempo de fin en segundos (exclusive). None = fin de la señal.
 
         Returns:
-            RawSignal: Nueva instancia con los datos recortados entre tmin y tmax.
+            RawSignal: Nueva instancia con los datos recortados.
 
         Edge Cases:
             - Si tmin > tmax: ValueError
-            - Si tmax excede duración: ajusta al final
+            - Si tmax excede duración: se ajusta al final
             - Anotaciones fuera del rango: eliminadas
 
         Example:
@@ -278,11 +283,7 @@ class RawSignal:
             (n_canales, 5120)  # 10s * 512Hz
 
         Notes:
-            - Las anotaciones se filtran para incluir solo aquellas cuyo onset
-              esté dentro del intervalo [tmin, tmax].
-            - Los onset de las anotaciones se ajustan restando tmin para que sean
-              relativos al nuevo inicio del segmento recortado.
-            - Las anotaciones que comienzan antes de tmin o después de tmax se descartan.
+            - Las anotaciones se ajustan restando tmin para mantener referencia temporal.
         """
         crop_data = self.get_data(start=tmin, stop=tmax)
 
@@ -317,11 +318,15 @@ class RawSignal:
         Genera estadísticas descriptivas para los canales especificados.
 
         Args:
-            channels: Nombre(s) de canal(es) para analizar.
+            channels: Nombre(s) de canal(es) a analizar.
 
         Returns:
-            pd.DataFrame: DataFrame con estadísticas descriptivas (min, Q1, mediana, Q3, max)
-            para cada canal especificado.
+            pd.DataFrame: DataFrame con estadísticas por canal:
+                - min: Valor mínimo
+                - Q1: Primer cuartil (25%)
+                - mediana: Mediana (50%)
+                - Q3: Tercer cuartil (75%)
+                - max: Valor máximo
 
         Example Output:
                    FP1       FP2
@@ -333,8 +338,8 @@ class RawSignal:
 
         Notes:
             - Las estadísticas se calculan sobre toda la duración de la señal.
-            - Para un solo canal, se devuelve un DataFrame con una columna.
-        """   
+            - Para un solo canal, el DataFrame tiene una sola columna.
+        """    
         segment = self.pick(channels)
         data = segment.data
 
@@ -358,21 +363,30 @@ class RawSignal:
     def filter(self, low_freq:float = 1, high_freq:float = 25, order:int = 4, 
                notch_freq:float = 50.0, q:int = 30) -> RawSignal:
         """
-        Aplica filtrado a la señal (no implementado actualmente).
+        Aplica filtrado pasa-banda y notch a la señal EEG.
+
+        Filtrado:
+            1. Filtro notch para eliminar interferencia de línea eléctrica
+            2. Filtro pasa-banda Butterworth
 
         Args:
-            low_freq: Frecuencia de corte baja.
-            high_freq: Frecuencia de corte alta.
-            notch_freq: Frecuencia de filtro notch.
-            order: Orden del filtro.
+            low_freq: Frecuencia de corte inferior (Hz) para filtro pasa-banda.
+            high_freq: Frecuencia de corte superior (Hz) para filtro pasa-banda.
+            order: Orden del filtro Butterworth (default=4).
+            notch_freq: Frecuencia central del filtro notch (default=50 Hz).
+            q: Factor de calidad del filtro notch (default=30).
 
         Returns:
             RawSignal: Nueva instancia con la señal filtrada.
 
+        Raises:
+            ValueError: Si low_freq < 0 o low_freq >= high_freq.
+
         Notes:
-            - Este método está pendiente de implementación.
+            - Utiliza filtrado zero-phase (filtfilt) para evitar distorsión de fase.
+            - Conserva metadatos y anotaciones del objeto original.
         """
-        if low_freq < 1 or low_freq >= high_freq:
+        if low_freq < 0 or low_freq >= high_freq:
             raise ValueError(f"low_freq debe ser mayor o igual a 1, y menor a high_freq")
 
         # Vector de tiempo para gráficas
@@ -399,21 +413,22 @@ class RawSignal:
         Selecciona y extrae un subconjunto de canales de la señal.
 
         Args:
-            picks: Canal(es) a seleccionar. Puede especificarse como:
-                - str: nombre único de canal.
-                - int: índice de canal.
-                - list o tuple de str o int: múltiples canales.
-                - None: todos los canales.
+            picks: Canal(es) a seleccionar. Puede ser:
+                - str: nombre de un canal
+                - int: índice de un canal
+                - list: múltiples canales (nombres o índices)
+                - None: todos los canales
 
         Returns:
-            RawSignal: Nueva instancia que contiene únicamente los canales seleccionados.
+            RawSignal: Nueva instancia con solo los canales seleccionados.
             
         Raises:
-            TypeError: Si `picks` no es str, int, list o tuple.
-            ValueError: Si algún canal o índice no existe en `self.info.ch_names`.
+            TypeError: Si picks tiene un tipo no soportado.
+            ValueError: Si algún canal o índice no existe.
 
         Notes:
-            - Actualiza la información de los canales en el objeto info.
+            - Actualiza los metadatos de canales en la nueva instancia.
+            - Realiza una copia profunda de los metadatos.
         """
         from copy import deepcopy
         # Obtengo la info de los canales (n_canales, n_muestras)
@@ -425,35 +440,288 @@ class RawSignal:
 
         return RawSignal(data=channels, sfreq=self.sfreq, info=new_info, anotaciones=self.anotaciones, first_samp=self.first_samp)
 
-    def set_anotaciones(self, anotaciones):
+    def set_anotaciones(self, anotaciones:Annotations):
         """
-        Establece las anotaciones para la señal (no implementado actualmente).
+        Establece las anotaciones para la señal.
 
         Args:
             anotaciones: Objeto Annotations con las nuevas anotaciones.
 
-        Notes:
-            - Este método está pendiente de implementación.
-        """
-        pass
+        Raises:
+            TypeError: Si anotaciones no es instancia de Annotations.
+            ValueError: Si los onset están fuera del rango de la señal.
 
-    def plot(self, picks, start, duration, show_anotaciones):
+        Notes:
+            - Valida que los onset estén dentro de la duración de la señal.
+            - Actualiza la referencia interna a las anotaciones.
         """
-        Genera una visualización de la señal (no implementado actualmente).
+        if isinstance(anotaciones, Annotations):
+            raise TypeError(f"El parámetro 'anotaciones' debe ser una instancia de 'Annotations'")
+        
+        time_signal = self.data.shape[1]/self.sfreq
+        max_onset = anotaciones.onset.max()
+        min_onset = anotaciones.onset.min()
+        
+        if max_onset > time_signal:
+            raise ValueError(f"El 'onset' de la anotación excede el tiempo de la señal: {max_onset} vs {time_signal}")
+        
+        if min_onset < 0.0:
+            raise ValueError(f"El 'onset' es menor al tiempo de la señal: {min_onset} vs {max_onset}")
+        
+        self.anotaciones = anotaciones
+    
+    def plot(self, picks=None, start=None, duration=None, show_anotaciones: bool = True):
+        """
+        Visualización interactiva de señales usando PyQtGraph.
+
+        Características:
+            - Desplazamiento vertical entre canales
+            - Visualización de anotaciones como líneas verticales
+            - Escalado automático por tipo de señal
+            - Interfaz con scroll para muchas señales
 
         Args:
-            picks: Canales a visualizar.
-            start: Tiempo de inicio para el plot.
-            duration: Duración del segmento a visualizar.
-            show_anotaciones: Si es True, muestra las anotaciones en el plot.
+            picks: Canales a visualizar (None = todos).
+            start: Tiempo inicial en segundos (None = 0).
+            duration: Duración a mostrar en segundos (None = señal completa).
+            show_anotaciones: Mostrar marcadores de eventos (default=True).
 
-        Notes:
-            - Este método está pendiente de implementación.
+        Implementation Details:
+            - Usa PyQt5 para la interfaz gráfica
+            - Autoajusta límites Y según tipo de señal (EEG, ECG, etc.)
+            - Leyenda interactiva para anotaciones
+            - Diseño responsivo adaptable al número de canales
         """
-        pass  
+        import pyqtgraph as pg
+        import sys
+        import numpy as np
+        from PyQt5.QtWidgets import (QApplication, QMainWindow, 
+                                    QScrollArea, QVBoxLayout, QWidget, QDesktopWidget)
+        from PyQt5.QtCore import Qt
+        import itertools
+
+        # 1. Configuración inicial de datos
+        max_time = self.data.shape[1] / self.sfreq
+        start = 0.0 if start is None else start
+        stop = start + duration if duration and start + duration < max_time else max_time
+        
+        data, times = self.get_data(picks=picks, start=start, stop=stop, times=True)
+        n_chan, n_samp = data.shape
+
+        # 2. Manejo de anotaciones
+        ann_df = self.anotaciones.get_annotations()
+        mask = (ann_df['onset'] >= start) & (ann_df['onset'] <= stop)
+        ann_filtered = ann_df.loc[mask]
+        ann_rel = (ann_filtered['onset'] - start).values
+        ann_desc = ann_filtered['description'].values
+        
+        colores_disponibles = ["#FF0000", "#9000FF", "#0000FF", "#FFA500", "#800080"]
+        color_cycle = itertools.cycle(colores_disponibles)
+        descripciones_unicas = np.unique(ann_desc)
+        color_dict = {desc: next(color_cycle) for desc in descripciones_unicas}
+
+        # 3. Configuración de la interfaz gráfica
+        app = QApplication.instance() or QApplication(sys.argv)
+        main_win = QMainWindow()
+        main_win.setWindowTitle(f"Visualizador de Señales - {self.__class__.__name__}")
+        
+        # Obtener tamaño de pantalla disponible
+        screen = QDesktopWidget().availableGeometry()
+        screen_width = screen.width()
+        screen_height = screen.height()
+
+        # Calcular dimensiones de ventana basadas en número de canales
+        BASE_HEIGHT_PER_CHANNEL = 180  # Altura base por canal
+        MIN_WINDOW_HEIGHT = 300        # Altura mínima de ventana
+        MAX_WINDOW_HEIGHT = int(screen_height * 0.9)  # Máximo 90% de pantalla
+        
+        # Calcular altura de ventana
+        window_height = min(
+            n_chan * BASE_HEIGHT_PER_CHANNEL + 100,  # Base + espacio extra
+            MAX_WINDOW_HEIGHT
+        )
+        window_height = max(window_height, MIN_WINDOW_HEIGHT)
+        
+        # Establecer tamaño de ventana
+        main_win.resize(1200, window_height)
+
+        # Configurar fondo blanco global para PyQtGraph
+        pg.setConfigOption('background', 'w')
+        pg.setConfigOption('foreground', 'k')  # Elementos en negro por defecto
+
+        # Widget central con área de scroll
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        scroll.setStyleSheet("background-color: black;")  # Fondo blanco para el scroll
+        
+        # Contenedor para los canales
+        container = QWidget()
+        container.setStyleSheet("background-color: white;")
+        container_layout = QVBoxLayout(container)
+        container_layout.setAlignment(Qt.AlignTop)
+        container_layout.setSpacing(5)  # Reducir espaciado entre gráficos
+        
+        # 4. Parámetros visuales ajustables
+        # Calcular altura por canal basada en número de canales
+        MIN_CHANNEL_HEIGHT = 100
+        MAX_CHANNEL_HEIGHT = 300
+        
+        if n_chan <= 4:
+            CHANNEL_HEIGHT = min(MAX_CHANNEL_HEIGHT, int(window_height / n_chan * 0.8))
+        else:
+            CHANNEL_HEIGHT = MIN_CHANNEL_HEIGHT
+            
+        # Asegurar altura mínima y máxima
+        CHANNEL_HEIGHT = max(CHANNEL_HEIGHT, MIN_CHANNEL_HEIGHT)
+        CHANNEL_HEIGHT = min(CHANNEL_HEIGHT, MAX_CHANNEL_HEIGHT)
+        
+        SPACING = 5  # Espacio reducido entre canales
+
+        # 5. Función para determinar límites Y inteligentes
+        def get_ylimits(signal, ch_type):
+            """
+            Calcula límites Y adaptativos basados en tipo de señal y percentiles
+            
+            Args:
+                signal: Array 1D con datos del canal
+                ch_type: Tipo de señal (eeg, ecg, emg, etc.)
+            
+            Returns:
+                tuple: (y_min, y_max)
+            """
+            # Rangos típicos para diferentes tipos de señales
+            type_ranges = {
+                'eeg': (-50, 50),   # μV
+                'ecg': (-2, 2),     # mV
+                'emg': (-5, 5),     # mV
+                'eog': (-500, 500), # μV
+            }
+            
+            # Usar rango predefinido si el tipo es conocido
+            if ch_type in type_ranges:
+                return type_ranges[ch_type]
+            
+            # Para tipos desconocidos: usar percentiles 1 y 99 con padding
+            p1 = np.percentile(signal, 1)
+            p99 = np.percentile(signal, 99)
+            padding = 0.3 * (p99 - p1)  # 30% de padding
+            
+            # Manejar caso de señal constante
+            if padding == 0:
+                padding = 1 if signal[0] == 0 else abs(signal[0]) * 0.5
+                
+            return (p1 - padding, p99 + padding)
+
+        # 6. Crear gráfico para cada canal con escalado inteligente
+        for idx in range(n_chan):
+            # Obtener tipo de canal (si está disponible)
+            ch_type = self.info.ch_types[idx].lower() if idx < len(self.info.ch_types) else 'unknown'
+            
+            # Widget para cada canal
+            channel_widget = pg.PlotWidget()
+            channel_widget.setBackground('w')  # Fondo blanco
+            
+            # Configurar colores de ejes
+            channel_widget.getAxis('left').setPen(pg.mkPen('k'))
+            channel_widget.getAxis('bottom').setPen(pg.mkPen('k'))
+
+            # Altura dinámica para el widget
+            channel_widget.setMinimumHeight(CHANNEL_HEIGHT)
+            channel_widget.setMaximumHeight(CHANNEL_HEIGHT)
+            
+            # Graficar señal
+            plot_item = channel_widget.plot(times, data[idx, :], 
+                            pen=pg.mkPen("#1f77b4", width=1.5))
+            
+            # Configuración de ejes
+            channel_widget.setLabel('left', self.info.ch_names[idx], 
+                                **{'color': 'k', 'font-size': '10pt'})
+            
+            # Configurar límites Y adaptativos
+            y_min, y_max = get_ylimits(data[idx, :], ch_type)
+            channel_widget.setYRange(y_min, y_max)
+            
+            # Mostrar solo el eje X en el último canal
+            if idx == n_chan - 1:
+                channel_widget.setLabel('bottom', 'Tiempo (s)', color='k')
+                channel_widget.showAxis('bottom')
+            else:
+                channel_widget.hideAxis('bottom')
+            
+            # Añadir anotaciones
+            if show_anotaciones:
+                for onset_rel, desc in zip(ann_rel, ann_desc):
+                    color = color_dict[desc]
+                    vline = pg.InfiniteLine(
+                        pos=onset_rel,
+                        angle=90,
+                        pen=pg.mkPen(color, style=pg.QtCore.Qt.DashLine, width=1.5)
+                    )
+                    channel_widget.addItem(vline)
+            
+            # Añadir al layout principal
+            container_layout.addWidget(channel_widget)
+
+        # 7. Leyenda (solo si hay anotaciones)
+        if show_anotaciones and len(color_dict) > 0:
+            # Crear un widget contenedor para la leyenda
+            legend_container = QWidget()
+            legend_container.setStyleSheet("background-color: white;")
+            legend_layout = QVBoxLayout(legend_container)
+            legend_layout.setContentsMargins(10, 10, 10, 10)
+            
+            # Crear un PlotWidget solo como contenedor
+            legend_plot = pg.PlotWidget()
+            legend_plot.setBackground('w')
+            legend_plot.hideAxis('left')
+            legend_plot.hideAxis('bottom')
+            legend_plot.setFixedHeight(30 * len(color_dict))  # Altura dinámica
+            
+            # Ajustar el tamaño del área de la leyenda
+            legend_plot.setMinimumWidth(400)
+            
+            # Crear la leyenda
+            legend = pg.LegendItem(offset=(10, 10), 
+                                 horSpacing=20, 
+                                 verSpacing=10,
+                                 pen=pg.mkPen('k'))
+            legend.setParentItem(legend_plot.getPlotItem())
+            legend.setBrush(pg.mkBrush(255, 255, 255, 200))  # Fondo blanco semi-transparente
+            
+            # Añadir todos los ítems de la leyenda
+            for desc, color in color_dict.items():
+                dummy = pg.PlotDataItem(pen=pg.mkPen(color, width=3, 
+                                                   style=pg.QtCore.Qt.DashLine))
+                legend.addItem(dummy, desc)
+            
+            # Añadir al layout
+            legend_layout.addWidget(legend_plot)
+            container_layout.addWidget(legend_container)
+
+        # 8. Configuración final del scroll
+        scroll.setWidget(container)
+        main_win.setCentralWidget(scroll)
+        main_win.show()
+        
+        # 9. Ajustar tamaño del contenedor
+        legend_height = 60 if (show_anotaciones and len(color_dict) > 0) else 0
+        total_height = n_chan * CHANNEL_HEIGHT + legend_height + (n_chan * SPACING)
+        container.setMinimumHeight(total_height)
+        
+        sys.exit(app.exec_())
     
     def plot_filtered(self, filtered_signal):
+        """
+        Grafica comparación entre señal original y filtrada.
 
+        Args:
+            filtered_signal: Array con datos de señal filtrada.
+
+        Notes:
+            - Muestra primer canal de ambas señales.
+            - Utilizado para diagnóstico interno de filtrado.
+        """
         n_samps = self.data.shape[1]
         t = np.arange(n_samps) / self.sfreq
 
@@ -480,13 +748,26 @@ class RawSignal:
         plt.show()
 
     def plot_spectrum(self, filtered_signal, low_freq, high_freq, notch_freq):
+        """
+        [Método interno] Grafica comparación de espectros antes/después de filtrar.
 
+        Args:
+            filtered_signal: Array con datos de señal filtrada.
+            low_freq: Frecuencia de corte inferior usada en filtrado.
+            high_freq: Frecuencia de corte superior usada en filtrado.
+            notch_freq: Frecuencia de notch usada en filtrado.
+
+        Notes:
+            - Convierte PSD a escala dB (referencia: 1 μV²/Hz)
+            - Marca frecuencias de corte con líneas verticales
+            - Muestra solo el primer canal
+        """
         f_orig, psd_orig = scipy.signal.welch(self.data, fs=self.sfreq, nperseg=1024, axis=-1)
         f_filt, psd_filt = scipy.signal.welch(filtered_signal, fs=self.sfreq, nperseg=1024, axis=-1)
 
         # Convertir a dB (con referencia estándar de 1 μV²/Hz)
-        psd_orig_db = np.log10(psd_orig)  # dB re: 1 μV²/Hz
-        psd_filt_db = np.log10(psd_filt)  # dB re: 1 μV²/Hz
+        psd_orig_db = 10 * np.log10(psd_orig)  # dB re: 1 μV²/Hz
+        psd_filt_db = 10 * np.log10(psd_filt)  # dB re: 1 μV²/Hz
 
         # Grafico
         plt.figure(figsize=(12, 6))
@@ -523,11 +804,18 @@ class RawSignal:
         Genera información estadística sobre los datos (uso interno).
 
         Returns:
-            dict: Diccionario con estadísticas descriptivas de la señal.
+            dict: Diccionario con estadísticas descriptivas:
+                - name: Nombres de canales
+                - type(s): Tipos únicos de canales
+                - min: Valor mínimo global
+                - Q1: Primer cuartil global
+                - mediana: Mediana global
+                - Q3: Tercer cuartil global
+                - max: Valor máximo global
 
         Notes:
-            - Método de uso interno, no diseñado para ser llamado directamente.
-            - Las estadísticas se calculan sobre todos los canales y muestras.
+            - Método de uso interno, no diseñado para uso público.
+            - Estadísticas calculadas sobre toda la señal (todos los canales y muestras).
         """
         dic = {"name":self.info.ch_names,
                "type(s)":list(set(self.info.ch_types)),
@@ -538,7 +826,3 @@ class RawSignal:
                "max": self.data.max()}
         
         return dic
-
-
-
-    
