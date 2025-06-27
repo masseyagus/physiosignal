@@ -532,8 +532,8 @@ class RawSignal:
         screen_height = screen.height() # Obtengo la altura útil de la pantalla
 
         # Calcular dimensiones de ventana basadas en número de canales
-        BASE_HEIGHT_PER_CHANNEL = 180  # Asigno la altura base con la que se muestra cada canal
-        MIN_WINDOW_HEIGHT = 300        # Altura mínima que tiene la ventana que abre Qt
+        BASE_HEIGHT_PER_CHANNEL = 220  # Asigno la altura base con la que se muestra cada canal
+        MIN_WINDOW_HEIGHT = 400        # Altura mínima que tiene la ventana que abre Qt
         MAX_WINDOW_HEIGHT = int(screen_height * 0.9)  # Limito la altura a un 90% útil de la pantalla
         
         # Calculo altura de la ventana Qt
@@ -565,8 +565,8 @@ class RawSignal:
         
         # 4. Parámetros visuales ajustables
         # Calcular altura por canal basada en número de canales
-        MIN_CHANNEL_HEIGHT = 100 # Altura mínima del gráfico para cada canal
-        MAX_CHANNEL_HEIGHT = 300 # Altura máxima del gráfico para cada canal
+        MIN_CHANNEL_HEIGHT = 220 # Altura mínima del gráfico para cada canal
+        MAX_CHANNEL_HEIGHT = 400 # Altura máxima del gráfico para cada canal
         
         if n_chan <= 4:
             # Para pocos canales, calculo dinámicamente la altura de cada canal
@@ -596,8 +596,8 @@ class RawSignal:
             # Rangos típicos para diferentes tipos de señales
             type_ranges = {
                 'eeg': (-50, 50),   # μV
-                'ecg': (-2, 2),     # mV
-                'emg': (-5, 5),     # mV
+                'ecg': (-150, 350),     # mV
+                'emg': (-150, 100),     # mV
                 'eog': (-500, 500), # μV
             }
             
@@ -789,7 +789,7 @@ class RawSignal:
         plt.tight_layout()
         plt.show()
 
-    def __getitem__(self): # [canal, muestras], si no hay devuelvo array vacío
+    def __getitem__(self, idx): # [canal, muestras], si no hay devuelvo array vacío
         """
         Permite el acceso por índices a los datos de la señal (no implementado actualmente).
 
@@ -799,7 +799,29 @@ class RawSignal:
         Notes:
             - Este método está pendiente de implementación.
         """
-        pass
+        # Si es un solo índice, devuelvo todo el canal completo
+        if not isinstance(idx, tuple):
+            picks = idx
+            muestras = None
+        else:
+            # idx = (picks, slice) o (picks, int)
+            if len(idx) != 2:
+                raise IndexError("Se debe indexar como [canal, muestras]")
+            
+            picks, muestras = idx
+        
+        if not isinstance(picks, (str, list, int)):
+            raise ValueError(f"Al indexar, canales debe ser un 'int', 'str' o 'list' y fue dado: {type(picks)}")
+    
+        if muestras is not None:
+            data = self.get_data(picks=picks)
+            if data.ndim == 1:
+                return data[muestras]
+            else:
+                return data[:, muestras]
+
+        elif isinstance(picks, (str, list, int)):
+            return self.get_data(picks=idx)
 
     def _getInfo(self):
         """
