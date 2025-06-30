@@ -60,13 +60,13 @@ class RawSignal:
             anotaciones : Annotations, optional
                 Eventos temporales asociados a la señal.
             first_samp : int, optional
-                Índice de la primera muestra respecto al registro original (default=0).
+                Índice de la primera muestra respecto al registro original.
             see_log : bool, optional
-                Activa/desactiva mensajes de logging (default=True).
+                Activa/desactiva mensajes de logging.
 
         Implementation Notes:
-            - Si sfreq es None, se obtiene de info.sfreq
-            - Configura el sistema de logging según see_log
+            - Si sfreq es None, se obtiene de info.sfreq.
+            - Configura el sistema de logging según see_log.
         """
         self.data = data # Matriz con forma (n_canales, n_muestras)
         self.info = info # Objeto Info
@@ -80,44 +80,38 @@ class RawSignal:
 
     def get_data(self, picks:str|np.array=None, start:float=None, stop:float=None, reject:float=None, times:bool=False):
         """
-        Extrae datos de señales con opciones de recorte temporal, filtrado por amplitud y selección de canales.
+        Extrae datos de señales con recorte temporal, selección de canales y
+        filtrado por amplitud pico-a-pico.
 
         Processing Pipeline:
-            1. Recorte temporal (si start/stop)
-            2. Selección de canales (si picks)
-            3. Filtrado por amplitud (si reject)
+            1. Recorte temporal según start/stop (s).
+            2. Selección de canales (picks).
+            3. Filtrado por amplitud (reject).
 
         Args:
-            picks: Canal(es) a seleccionar. Puede ser:
-                - str: nombre de un canal
-                - int: índice de un canal
-                - list: múltiples canales (nombres o índices)
-                - None: todos los canales (default)
-            start: Tiempo de inicio en segundos (None = inicio de la señal).
-            stop: Tiempo de fin en segundos (None = fin de la señal).
-            reject: Umbral de amplitud pico a pico (en μV) para descartar canales ruidosos.
-            times: Si True, retorna también el vector de tiempos.
+            picks : str, int, list o tuple, optional
+                Canal(es) a seleccionar. None = todos.
+            start : float, optional
+                Tiempo de inicio en segundos; None = 0.0.
+            stop : float, optional
+                Tiempo de fin en segundos; None = duración completa.
+            reject : float, optional
+                Umbral pico-a-pico en µV para descartar canales ruidosos.
+            times : bool, optional
+                Si True, también devuelve vector de tiempos.
 
         Returns:
-            data: Array con forma (n_canales, n_muestras) o (n_muestras,) si un solo canal.
-            time_vector (opcional): Vector 1D de tiempos en segundos (solo si times=True).
+            np.ndarray or (np.ndarray, np.ndarray):
+                - data: Array de forma (n_canales, n_muestras) o (n_muestras,) si un canal.
+                - time_vector: Vector de tiempos en s (solo si times=True).
 
         Raises:
-            ValueError: Si los parámetros start/stop son inválidos o reject < 0.
-            TypeError: Si picks tiene un tipo no soportado.
-
-        Usage Examples:
-            >>> # Extraer canales FP1-FP2 entre 10-20s con umbral 150μV
-            >>> datos = raw.get_data(
-            >>>     picks=['FP1','FP2'],
-            >>>     start=10,
-            >>>     stop=20,
-            >>>     reject=150
-            >>> )
+            ValueError: Si start/stop fuera de rango o reject < 0.
+            TypeError: picks no es str, int, list ni tuple.
 
         Notes:
             - El filtrado por amplitud se aplica después de la selección de canales.
-            - El vector de tiempos incluye el offset de first_samp.
+            - El time_vector está desplazado por first_samp.
         """
         duration = self.data.shape[1]/self.sfreq # Hallo la duración de la señal
         data = self.data.copy()
@@ -258,32 +252,27 @@ class RawSignal:
 
     def crop(self, tmin:int=None, tmax:int=None) -> RawSignal:
         """
-        Recorta la señal en un intervalo de tiempo especificado.
+        Recorta la señal en un intervalo de tiempo.
 
         Temporal Processing:
-            - Recorta datos entre tmin y tmax
-            - Ajusta anotaciones al nuevo intervalo
-            - Actualiza first_samp
+            - Recorta datos entre tmin y tmax.
+            - Ajusta anotaciones restando tmin.
+            - Actualiza first_samp.
 
         Args:
-            tmin: Tiempo de inicio en segundos (inclusive). None = 0.
-            tmax: Tiempo de fin en segundos (exclusive). None = fin de la señal.
+            tmin : float, optional
+                Tiempo de inicio en s (inclusive); None = 0.
+            tmax : float, optional
+                Tiempo de fin en s (exclusive); None = fin.
 
         Returns:
-            RawSignal: Nueva instancia con los datos recortados.
+            RawSignal: Nueva instancia con datos recortados.
 
-        Edge Cases:
-            - Si tmin > tmax: ValueError
-            - Si tmax excede duración: se ajusta al final
-            - Anotaciones fuera del rango: eliminadas
-
-        Example:
-            >>> recortada = raw.crop(tmin=5, tmax=15)  # 10 segundos
-            >>> print(recortada.data.shape)
-            (n_canales, 5120)  # 10s * 512Hz
+        Raises:
+            ValueError: Si tmin > tmax.
 
         Notes:
-            - Las anotaciones se ajustan restando tmin para mantener referencia temporal.
+            - Anotaciones fuera de rango se eliminan.
         """
         crop_data = self.get_data(start=tmin, stop=tmax)
 
@@ -363,28 +352,32 @@ class RawSignal:
     def filter(self, low_freq:float = 1, high_freq:float = 25, order:int = 4, 
                notch_freq:float = 50.0, q:int = 30) -> RawSignal:
         """
-        Aplica filtrado pasa-banda y notch a la señal EEG.
+        Aplica filtrado pasa-banda y notch a la señal.
 
         Filtrado:
-            1. Filtro notch para eliminar interferencia de línea eléctrica
-            2. Filtro pasa-banda Butterworth
+            1. Notch para interferencia de línea.
+            2. Butterworth pasa-banda.
 
         Args:
-            low_freq: Frecuencia de corte inferior (Hz) para filtro pasa-banda.
-            high_freq: Frecuencia de corte superior (Hz) para filtro pasa-banda.
-            order: Orden del filtro Butterworth (default=4).
-            notch_freq: Frecuencia central del filtro notch (default=50 Hz).
-            q: Factor de calidad del filtro notch (default=30).
+            low_freq : float, optional
+                Corte inferior en Hz.
+            high_freq : float, optional
+                Corte superior en Hz.
+            order : int, optional
+                Orden del filtro Butterworth.
+            notch_freq : float, optional
+                Frecuencia central del notch.
+            q : int, optional
+                Factor de calidad del notch.
 
         Returns:
-            RawSignal: Nueva instancia con la señal filtrada.
+            RawSignal: Nueva instancia filtrada.
 
         Raises:
-            ValueError: Si low_freq < 0 o low_freq >= high_freq.
+            ValueError: low_freq < 0 o low_freq >= high_freq.
 
         Notes:
-            - Utiliza filtrado zero-phase (filtfilt) para evitar distorsión de fase.
-            - Conserva metadatos y anotaciones del objeto original.
+            - Usa filtfilt para preservar fase.
         """
         if low_freq < 0 or low_freq >= high_freq:
             raise ValueError(f"low_freq debe ser mayor o igual a 1, y menor a high_freq")
@@ -442,18 +435,18 @@ class RawSignal:
 
     def set_anotaciones(self, anotaciones:Annotations):
         """
-        Establece las anotaciones para la señal.
+        Asigna nuevas anotaciones a la señal.
 
         Args:
-            anotaciones: Objeto Annotations con las nuevas anotaciones.
+            anotaciones : Annotations
+                Objeto con eventos temporales.
 
         Raises:
-            TypeError: Si anotaciones no es instancia de Annotations.
-            ValueError: Si los onset están fuera del rango de la señal.
+            TypeError: anotaciones no es Annotations.
+            ValueError: onset fuera de rango.
 
         Notes:
-            - Valida que los onset estén dentro de la duración de la señal.
-            - Actualiza la referencia interna a las anotaciones.
+            - Valida onset entre 0 y duración.
         """
         if isinstance(anotaciones, Annotations):
             raise TypeError(f"El parámetro 'anotaciones' debe ser una instancia de 'Annotations'")
@@ -472,25 +465,27 @@ class RawSignal:
     
     def plot(self, picks=None, start=None, duration=None, show_anotaciones: bool = True):
         """
-        Visualización interactiva de señales usando PyQtGraph.
+        Visualización interactiva con PyQtGraph.
 
         Características:
-            - Desplazamiento vertical entre canales
-            - Visualización de anotaciones como líneas verticales
-            - Escalado automático por tipo de señal
-            - Interfaz con scroll para muchas señales
+            - Scroll vertical de canales.
+            - Líneas de anotación.
+            - Escalado Y por tipo de señal.
+            - Ventana adaptable al número de canales.
 
         Args:
-            picks: Canales a visualizar (None = todos).
-            start: Tiempo inicial en segundos (None = 0).
-            duration: Duración a mostrar en segundos (None = señal completa).
-            show_anotaciones: Mostrar marcadores de eventos (default=True).
+            picks : int, str, list o tuple, optional
+                Canales a visualizar.
+            start : float, optional
+                Tiempo inicial en s.
+            duration : float, optional
+                Duración del segmento en s.
+            show_anotaciones : bool, optional
+                Mostrar líneas de eventos.
 
         Implementation Details:
-            - Usa PyQt5 para la interfaz gráfica
-            - Autoajusta límites Y según tipo de señal (EEG, ECG, etc.)
-            - Leyenda interactiva para anotaciones
-            - Diseño responsivo adaptable al número de canales
+            - Usa PyQt5 y pyqtgraph.
+            - Leyenda horizontal de anotaciones.
         """
         import pyqtgraph as pg
         import sys
@@ -596,8 +591,8 @@ class RawSignal:
             # Rangos típicos para diferentes tipos de señales
             type_ranges = {
                 'eeg': (-50, 50),   # μV
-                'ecg': (-150, 350),     # mV
-                'emg': (-150, 100),     # mV
+                'ecg': (-150, 350), # mV
+                'emg': (-150, 100), # mV
                 'eog': (-500, 500), # μV
             }
             
@@ -712,57 +707,88 @@ class RawSignal:
         # Ejecuto la ventana y cierro al cerrar la ventana
         sys.exit(app.exec_()) 
     
-    def plot_filtered(self, filtered_signal):
+    def plot_filtered(self, filtered_signal, tmin:int=0, tmax:int=10, channel:int=0):
         """
-        Grafica comparación entre señal original y filtrada.
+        Grafica comparación señal original vs filtrada.
 
         Args:
-            filtered_signal: Array con datos de señal filtrada.
+            filtered_signal : np.ndarray
+                Señal filtrada (n_canales, n_muestras).
+            tmin : float, optional
+                Tiempo inicial en s (inclusive).
+            tmax : float, optional
+                Tiempo final en s (exclusive).
+            channel : int, optional
+                Índice del canal a mostrar.
+
+        Raises:
+            ValueError: tmin >= tmax o tmin < 0.
 
         Notes:
-            - Muestra primer canal de ambas señales.
-            - Utilizado para diagnóstico interno de filtrado.
+            - Ajusta límites Y según tipo de canal.
         """
         n_samps = self.data.shape[1]
         t = np.arange(n_samps) / self.sfreq
+        
+        if tmin >= tmax or tmin < 0:
+            raise ValueError(f"tmin >= tmax o tmin < 0")
+        
+        min_sample = tmin * self.sfreq
+        max_sample = (n_samps/self.sfreq) if tmax > (n_samps/self.sfreq) else tmax * self.sfreq
 
         # Graficamos la señal original y la señal filtrada
         plt.figure(figsize=(12, 6))
         plt.subplot(2, 1, 1)
-        plt.plot(t, self.data[0,:], label='Señal Original', color='blue')
+        plt.plot(t[min_sample:max_sample], self.data[channel, min_sample:max_sample], label='Señal Original', color='blue')
         plt.title('Señal Original')
         plt.xlabel('Tiempo (s)')
         plt.ylabel('Amplitud')
-        plt.ylim(-200, 200)
+        if self.info.ch_types[0] == "ecg":
+            plt.ylim(-200, 400)
+        elif self.info.ch_types[0] == "eeg":
+            plt.ylim(-100, 100)
+        else:
+            plt.ylim(-300, 300)
+
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.legend()
 
         plt.subplot(2, 1, 2)
-        plt.plot(t, filtered_signal[0,:], label='Señal Filtrada', color='red')
+        plt.plot(t[min_sample:max_sample], filtered_signal[channel, min_sample:max_sample], label='Señal Filtrada', color='red')
         plt.title('Señal Filtrada')
         plt.xlabel('Tiempo (s)')
         plt.ylabel('Amplitud')
         plt.legend()
         plt.tight_layout()
-        plt.ylim(-200, 200)
+        if self.info.ch_types[0] == "ecg":
+            plt.ylim(-200, 400)
+        elif self.info.ch_types[0] == "eeg":
+            plt.ylim(-100, 100)
+        else:
+            plt.ylim(-300, 300)
+
         plt.grid(True, linestyle='--', alpha=0.7)
         plt.show()
 
     def plot_spectrum(self, filtered_signal, low_freq, high_freq, notch_freq, ch_idx):
         """
-        [Método interno] Grafica comparación de espectros antes/después de filtrar.
+        Grafica PSD original vs filtrada de un canal.
 
         Args:
-            filtered_signal: Array con datos de señal filtrada.
-            low_freq: Frecuencia de corte inferior usada en filtrado.
-            high_freq: Frecuencia de corte superior usada en filtrado.
-            notch_freq: Frecuencia de notch usada en filtrado.
-            ch_idx: Índice del canal que se quiere mostrar.
+            filtered_signal : np.ndarray
+                Datos filtrados (n_canales, n_muestras).
+            low_freq : float
+                Corte inferior en Hz.
+            high_freq : float
+                Corte superior en Hz.
+            notch_freq : float
+                Frecuencia del notch.
+            ch_idx : int
+                Índice de canal a mostrar.
 
         Notes:
-            - Convierte PSD a escala dB (referencia: 1 μV²/Hz)
-            - Marca frecuencias de corte con líneas verticales
-            - Muestra solo el primer canal
+            - PSD en dB (μV²/Hz).
+            - Marca frecuencias de corte.
         """
         f_orig, psd_orig = scipy.signal.welch(self.data, fs=self.sfreq, nperseg=1024, axis=-1)
         f_filt, psd_filt = scipy.signal.welch(filtered_signal, fs=self.sfreq, nperseg=1024, axis=-1)
@@ -791,13 +817,19 @@ class RawSignal:
 
     def __getitem__(self, idx): # [canal, muestras], si no hay devuelvo array vacío
         """
-        Permite el acceso por índices a los datos de la señal (no implementado actualmente).
+        Permite acceso tipo obj[canal, muestras].
+
+        Args:
+            idx : int, str, list o tuple
+                - int/str/list: picks de canales.
+                - slice o int en segunda posición: muestras.
 
         Returns:
-            np.ndarray: Segmento solicitado de los datos.
+            np.ndarray: Segmento solicitado.
 
-        Notes:
-            - Este método está pendiente de implementación.
+        Raises:
+            IndexError: Si len(idx)!=2 cuando es tupla.
+            TypeError: picks no soportado.
         """
         # Si es un solo índice, devuelvo todo el canal completo
         if not isinstance(idx, tuple):
