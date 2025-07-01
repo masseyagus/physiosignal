@@ -56,3 +56,5 @@ tif_2025/                  # Directorio raíz
   - Pandas
   - Matplotlib
   - SciPy
+  - PyQtGraph
+  - PyQt5
