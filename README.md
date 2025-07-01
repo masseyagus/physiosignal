@@ -47,6 +47,11 @@ tif_2025/                  # Directorio raíz
 ```
 ---
 
+## 📐 Diagrama de Clases UML
+
+![Diagrama UML](tif_2025\physiosignal_uml.jpg)
+
+
 ## ⚙️ Requisitos
 
 - **Python 3.10 o superior**.
