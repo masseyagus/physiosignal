@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="physiosignal",
-    version="1.2.0",
+    version="1.3.0",
     description="Librería para procesamiento de señales EEG, ECG y EMG",
     author="Agustín Quintana",
     packages=find_packages(),
@@ -10,7 +10,9 @@ setup(
         "numpy>=1.21",
         "pandas>=1.3",
         "matplotlib>=3.5",
-        "scipy>=1.9"
+        "scipy>=1.9",
+        "pyqtgraph>=0.12",
+        "PyQt5>=5.15"
     ],
     python_requires=">=3.10"
 )
