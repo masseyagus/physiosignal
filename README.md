@@ -49,7 +49,7 @@ tif_2025/                  # Directorio raíz
 
 ## 📐 Diagrama de Clases UML
 
-![Diagrama UML](./physiosignal_uml.jpg)
+![Diagrama UML](./physiosignal_uml_dark.jpg)
 
 
 ## ⚙️ Requisitos
