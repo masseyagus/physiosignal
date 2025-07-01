@@ -18,8 +18,33 @@ Diseñar e implementar una librería modular y escalable para el procesamiento d
 ---
 
 ## 🗂 Estructura del Repositorio
-proximamente
-
+```plaintext
+tif_2025/                  # Directorio raíz
+├── physiosignal/          # Código fuente del sistema
+│   ├──info/
+│   │   ├── __init__.py
+│   │   ├── annotations.py
+│   │   ├── info.py
+│   ├── logger/
+│   │   ├── __init__.py
+│   │   ├── logger_config.py
+│   ├── signals/
+│   │   ├── __init__.py
+│   │   ├── ecg.py
+│   │   ├── eeg.py
+│   │   ├── emg.py
+│   │   ├── raw.py
+│   ├── utils/
+│   │   ├── __init__.py
+│   │   ├── a_checkers.py
+├── testings/
+│   ├── test_sys.ipynb 
+├── __init__.py
+├── .gitignore
+├── README.md
+├── requirements.txt
+└── setup.py
+```
 ---
 
 ## ⚙️ Requisitos
