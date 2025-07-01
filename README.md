@@ -51,7 +51,7 @@ tif_2025/                  # Directorio raíz
 
 ![Diagrama UML](./physiosignal_uml.jpg)
 
---
+---
 
 ## ⚙️ Requisitos
 
