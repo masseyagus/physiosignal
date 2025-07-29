@@ -9,6 +9,55 @@ import pandas as pd
 import scipy.signal
 import logging
 
+def _type_check(datos, info, anotaciones, first_samp) -> tuple:
+    """
+    Valida los tipos y dimensiones de los argumentos requeridos por la clase RawSignal.
+
+    Args:
+        datos : np.ndarray
+            Matriz bidimensional con los datos de la señal en forma (n_canales, n_muestras).
+        info : Info
+            Instancia de la clase Info que contiene metadatos de la señal.
+        anotaciones : Annotations
+            Instancia de la clase Annotations con eventos asociados a la señal.
+        first_samp : int
+            Índice de la primera muestra respecto al registro original.
+
+    Returns:
+        tuple
+            Tupla con los parámetros validados en el siguiente orden: (datos, info, anotaciones, first_samp).
+
+    Raises:
+        TypeError:
+            - Si `datos` no es un arreglo de NumPy.
+            - Si `info` no es una instancia de la clase Info.
+            - Si `anotaciones` no es una instancia de la clase Annotations.
+            - Si `first_samp` no es un entero.
+        ValueError:
+            - Si `datos` no tiene exactamente dos dimensiones.
+
+    Notes:
+        Esta función se utiliza internamente por RawSignal para asegurar que los parámetros críticos
+        cumplen con los requisitos mínimos antes de instanciar el objeto.
+    """
+    if not isinstance(datos, np.ndarray):
+        raise TypeError(f"datos debe ser de tipo np.ndarray, pero se recibió: {type(datos).__name__}")
+    
+    if datos.ndim != 2:
+        raise ValueError(f"La dimensión de los datos debe ser de 2, (n_canales, n_muestras), pero se recibió: {datos.ndim}")
+    
+    if not isinstance(info, Info):
+        raise TypeError(f"info debe ser una instancia de la clase Info, pero se recibió: {type(info).__name__}")
+    
+    if not isinstance(anotaciones, Annotations):
+        raise TypeError(f"anotacioens deben ser una instancia de la clase Annotations," 
+                        f"pero se recibió: {type(anotaciones).__name__}")
+    
+    if not isinstance(first_samp, int):
+        raise TypeError(f"first_samp debe ser un int, pero fue dado: {type(first_samp).__name__}")
+    
+    return datos, info, anotaciones, first_samp
+
 class RawSignal:
     """
     Representa una señal de datos crudos (por ejemplo, EEG) junto con su
@@ -51,28 +100,38 @@ class RawSignal:
         Inicializa una instancia de RawSignal.
 
         Parameters:
-            data : np.ndarray, optional
-                Matriz (n_canales, n_muestras) con datos de señal.
+            data : np.ndarray
+                Matriz de forma (n_canales, n_muestras) con los valores de la señal.
             sfreq : float, optional
-                Frecuencia de muestreo en Hz. Si es None, se usa info.sfreq.
-            info : Info, optional
-                Metadatos de canales (nombres, tipos, etc.).
-            anotaciones : Annotations, optional
-                Eventos temporales asociados a la señal.
-            first_samp : int, optional
+                Frecuencia de muestreo en Hz. Si es None, se usará info.sfreq.
+            info : Info
+                Objeto Info con metadatos de canales (nombres, tipos, etc.).
+            anotaciones : Annotations
+                Objeto Annotations con eventos temporales asociados.
+            first_samp : int
                 Índice de la primera muestra respecto al registro original.
             see_log : bool, optional
-                Activa/desactiva mensajes de logging.
+                Activa o desactiva el logging interno (default=True).
+
+        Raises:
+            TypeError:
+                - Si `data` no es np.ndarray.
+                - Si `info` no es una instancia de Info.
+                - Si `anotaciones` no es una instancia de Annotations.
+                - Si `first_samp` no es int.
+            ValueError:
+                - Si `data` no es bidimensional (n_canales, n_muestras).
 
         Implementation Notes:
-            - Si sfreq es None, se obtiene de info.sfreq.
-            - Configura el sistema de logging según see_log.
+            - Se invoca `_type_check` para validar y asignar `data`, `info`,
+            `anotaciones` y `first_samp`.
+            - Si `sfreq` es None, se toma de `info.sfreq`; de lo contrario,
+            se usa el valor suministrado.
+            - Configura el sistema de logging según `see_log`.
         """
-        self.data = data # Matriz con forma (n_canales, n_muestras)
-        self.info = info # Objeto Info
-        self.anotaciones = anotaciones # Objeto Annotations
-        self.sfreq = self.info.sfreq if sfreq is None else sfreq
-        self.first_samp = first_samp # Índice de la primera muestra
+        self.data, self.info, self.anotaciones, self.first_samp = _type_check(data, info, anotaciones, first_samp)
+        
+        self.sfreq = self.info.sfreq if sfreq is None else float(sfreq)
 
         # Configuración inicial del logger
         log_config(see_log)  
@@ -162,6 +221,7 @@ class RawSignal:
             
             else:
                 raise TypeError(f"El parámetro 'picks' debe ser str, int, list o tuple")
+            
         # Filtro por amplitud
         if reject is not None:
 
@@ -172,8 +232,8 @@ class RawSignal:
             pic_to_pic = index <= reject # Verifico que cumpla
 
             data = data[pic_to_pic,:]
-        else:
-            data = data # Si no se solicita filtro, genero la variable data con toda la información
+        # else:
+        #     data = data # Si no se solicita filtro, genero la variable data con toda la información
 
         # Genero vector de tiempos en 1D  
         if times:
@@ -225,19 +285,20 @@ class RawSignal:
                 try:
                     idx.append(self.info.ch_names.index(ch))
                 except:
-                    raise TypeError(f"Cada ítem en ch_names debe ser str o int; se recibió {type(ch).__name__}")
+                    raise TypeError(f"Cada ítem en ch_names debe ser str; se recibió {type(ch).__name__}")
                 
-        drop_idx = sorted(idx, reverse=True)
+        drop_idx = sorted(idx, reverse=True) # Índice a dropear
 
-        info_ch_names = list(self.info.ch_names)
-        info_ch_types = list(self.info.ch_types)
+        info_ch_names = list(self.info.ch_names) # Nombre de canales en self.info
+        info_ch_types = list(self.info.ch_types) # Tipos de canales en self.info
         data = self.data.copy()
 
         for i in drop_idx:
-            info_ch_names.pop(i)
-            info_ch_types.pop(i)
-            data = np.delete(data, i, axis=0)
+            info_ch_names.pop(i) # Quito nombre de canal de la variable info_ch_names
+            info_ch_types.pop(i) # Quito tipo de canal de la variable info_ch_types
+            data = np.delete(data, i, axis=0) # Elimino el canal de los datos
 
+        # Nuevas instancias
         newInfo = Info(ch_names=info_ch_names, ch_types=info_ch_types, sfreq=self.sfreq)
         newRaw = RawSignal(data=data, info=newInfo, anotaciones=self.anotaciones, first_samp=self.first_samp)
 
@@ -273,6 +334,7 @@ class RawSignal:
 
         Notes:
             - Anotaciones fuera de rango se eliminan.
+            - La columna `ch_names` es opcional y se incluirá solo si está presente en las anotaciones.
         """
         crop_data = self.get_data(start=tmin, stop=tmax)
 
@@ -283,8 +345,13 @@ class RawSignal:
 
         # Actualizo anotaciones
         df = self.anotaciones.get_annotations()
+        required_cols = ['onset', 'duration', 'description']
 
         if df is not None and not df.empty:
+            # Verifico la existencia de las columnas onset, duration, description
+            if not set(required_cols) <= set(df.columns):
+                raise ValueError(f"Las anotaciones deben poseer las siguientes columnas: {required_cols}")
+            
             mask = (df['onset'] >=tmin) & (df["onset"] <= tmax)
             filtered = df[mask].copy()
 
@@ -296,9 +363,10 @@ class RawSignal:
         onset = filtered["onset"]
         duration = filtered['duration']
         description = filtered['description']
-        ch_names = filtered['ch_names']
+        ch_names = filtered['ch_names'] if "ch_names" in filtered.columns else None
 
         new_ann = Annotations(onset=onset, duration=duration, description=description, ch_names=ch_names)
+        logging.info("Señal recortada correctamente")
 
         return RawSignal(data=crop_data, sfreq=self.sfreq, info=self.info, anotaciones=new_ann, first_samp=new_first_samp)
 
@@ -462,6 +530,8 @@ class RawSignal:
             raise ValueError(f"El 'onset' es menor al tiempo de la señal: {min_onset} vs {max_onset}")
         
         self.anotaciones = anotaciones
+
+        logging.info("Anotación asignada correctamente")
     
     def plot(self, picks=None, start=None, duration=None, show_anotaciones: bool = True):
         """
