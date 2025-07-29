@@ -135,7 +135,7 @@ class RawSignal:
 
         # Configuración inicial del logger
         log_config(see_log)  
-        self._logger = logging.getLogger(__name__)
+        self._logger = logging.getLogger(__name__) # __name__ toma el nombre del submódulo
 
     def get_data(self, picks:str|np.array=None, start:float=None, stop:float=None, reject:float=None, times:bool=False):
         """
@@ -895,17 +895,22 @@ class RawSignal:
                 - slice o int en segunda posición: muestras.
 
         Returns:
-            np.ndarray: Segmento solicitado.
+            np.ndarray:
+                Segmento solicitado. Si `idx` no corresponde a un canal/muestras válidos
+                (p.ej. tipo no soportado), devuelve un array vacío de forma (0, 0).
 
         Raises:
-            IndexError: Si len(idx)!=2 cuando es tupla.
-            TypeError: picks no soportado.
+            IndexError:
+                Si `idx` es tupla y `len(idx) != 2`.
+            ValueError:
+                Si `picks` no es `int`, `str` ni `list`.
         """
         # Si es un solo índice, devuelvo todo el canal completo
-        if not isinstance(idx, tuple):
+        if not isinstance(idx, tuple): # obj[x]
             picks = idx
             muestras = None
-        else:
+
+        else: # obj[x, y]
             # idx = (picks, slice) o (picks, int)
             if len(idx) != 2:
                 raise IndexError("Se debe indexar como [canal, muestras]")
@@ -924,6 +929,9 @@ class RawSignal:
 
         elif isinstance(picks, (str, list, int)):
             return self.get_data(picks=idx)
+        
+        else:
+            return np.empty(shape=(0,0))
 
     def _getInfo(self):
         """
