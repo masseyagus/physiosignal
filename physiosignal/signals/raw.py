@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from physiosignal.info import Info
-from physiosignal.info import Annotations
+from physiosignal.info import Info, Annotations
 from physiosignal.logger import log_config
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import scipy.signal
 import logging
 
 def _type_check(datos, info, anotaciones, first_samp) -> tuple:
@@ -447,6 +445,8 @@ class RawSignal:
         Notes:
             - Usa filtfilt para preservar fase.
         """
+        import scipy.signal
+        
         if low_freq < 0 or low_freq >= high_freq:
             raise ValueError(f"low_freq debe ser mayor o igual a 1, y menor a high_freq")
 
@@ -885,7 +885,7 @@ class RawSignal:
         plt.tight_layout()
         plt.show()
 
-    def __getitem__(self, idx): # [canal, muestras], si no hay devuelvo array vacío
+    def __getitem__(self, idx): 
         """
         Permite acceso tipo obj[canal, muestras].
 
