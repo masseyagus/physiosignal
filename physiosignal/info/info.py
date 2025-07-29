@@ -126,6 +126,20 @@ class Info:
         """
         return asdict(self)
 
+    def keys(self) -> List[str]:
+        """
+        Devuelve los nombres de todos los atributos definidos en la instancia de Info.
+
+        Returns:
+            List[str]: Lista de cadenas con el nombre de cada atributo de la dataclass.
+
+        Example:
+            >>> info = Info(ch_names=['Fp1','Fp2'], ch_types='eeg', sfreq=512)
+            >>> info.keys()
+            ['ch_names', 'ch_types', 'sfreq', 'bad_channels', 'experimenter', 'subject_info', 'register_type']
+        """
+        return list(self.__annotations__.keys())
+
     def rename_channels(self, new_names:dict) -> "Info":
         """
         Renombra canales manteniendo la integridad de los datos asociados
