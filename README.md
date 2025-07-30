@@ -1,6 +1,6 @@
-# Librería para Procesamiento de Señales Fisiológicas (EEG, ECG, EMG)
+# Physiosignal
 
-Una librería desarrollada en Python para el procesamiento, análisis y visualización de señales fisiológicas (EEG, ECG, EMG) utilizando Programación Orientada a Objetos (POO).
+Una librería desarrollada en Python para el procesamiento, análisis y visualización de señales fisiológicas de EEG, ECG y EMG utilizando Programación Orientada a Objetos (POO).
 
 ---
 
