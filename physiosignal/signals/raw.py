@@ -446,7 +446,7 @@ class RawSignal:
             - Usa filtfilt para preservar fase.
         """
         import scipy.signal
-        
+
         if low_freq < 0 or low_freq >= high_freq:
             raise ValueError(f"low_freq debe ser mayor o igual a 1, y menor a high_freq")
 
@@ -860,6 +860,8 @@ class RawSignal:
             - PSD en dB (μV²/Hz).
             - Marca frecuencias de corte.
         """
+        import scipy.signal
+
         f_orig, psd_orig = scipy.signal.welch(self.data, fs=self.sfreq, nperseg=1024, axis=-1)
         f_filt, psd_filt = scipy.signal.welch(filtered_signal, fs=self.sfreq, nperseg=1024, axis=-1)
 
