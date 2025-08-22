@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from physiosignal.signals import RawSignal
+from .raw import RawSignal
 from physiosignal.info import Info, Annotations
 from physiosignal.logger import log_config
 
