@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from physiosignal.signals import RawSignal
+from .raw import RawSignal
 from physiosignal.info import Info, Annotations
 from physiosignal.logger import log_config
 
@@ -60,7 +60,7 @@ class ECG(RawSignal):
         
         super().__init__(data, sfreq, info, anotaciones, first_samp, see_log)
         self.r_picks = r_picks
-        self-heart_rate = heart_rate
+        self.heart_rate = heart_rate
 
         # Configuración inicial del logger
         log_config(see_log)  
