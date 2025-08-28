@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from physiosignal.signals import RawSignal
+from .raw import RawSignal
 from physiosignal.info import Info, Annotations
 from physiosignal.logger import log_config
 
@@ -63,12 +63,59 @@ class EEG(RawSignal):
         log_config(see_log)  
         self._logger = logging.getLogger(__name__) # __name__ toma el nombre del submódulo
 
+    def change_reference(self, reference:str, dic_ref:str, plot:bool, ch:str='Cz'):
 
-    def change_reference(self):
-        pass
+        import json
 
-    def laplace(self):
-        pass
+        reference = reference.lower()
+
+        if reference == 'canal':   
+            ref_data = self.data[ch, :] # Canal de referencia
+            new_data = self.data - ref_data[None, :] # Nueva referencia para todos los canales ref[None, :] inserta una nueva dimension
+
+            self.data_canal = new_data
+
+            if plot:
+                pass
+
+        elif reference == 'laplaciano':
+
+            with open(dic_ref, "r") as f:
+                ref_dic = json.load(f)
+
+            name_to_idx = {ch: idx for idx, ch in enumerate(self.info.ch_names)}
+
+            laplace = np.zeros_like(self.data, dtype=float)
+
+            for idx, ch_name in enumerate(self.info.ch_names):
+
+                if ch_name in ref_dic:
+                    values_ch = ref_dic[ch_name]
+
+                    neigh_idx = [name_to_idx[neigh] for neigh in values_ch if isinstance(neigh, str) and neigh in name_to_idx]
+
+                    if len(neigh_idx) == 0:
+                        laplace[idx, :] = self.data[idx, :].astype(float)
+                    else:
+                        laplace[idx, :] = self.data[idx, :].astype(float) - np.mean(self.data[neigh_idx, :], axis=0)
+                else:
+                    laplace[idx, :] = self.data[idx, :].astype(float)
+
+            self.data_laplaciano = laplace
+
+            if plot:
+                pass
+
+        elif reference == "promedio":
+
+            ch_prom = np.mean(self.data, axis=0)
+
+            avg_ref = self.data - ch_prom
+
+            self.avg_ref = avg_ref
+
+            if plot:
+                pass
 
     def fft(self):
         pass
