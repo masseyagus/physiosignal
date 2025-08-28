@@ -8,7 +8,6 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Futura implementación
 class EEG(RawSignal):
     """
     Representa una señal de Electroencefalografía (EEG) con herramientas específicas de análisis.
@@ -91,7 +90,6 @@ class EEG(RawSignal):
             >>> eeg.channel_reference(ch='Cz', plot=True)
             >>> eeg.channel_reference(ch='Pz', plot=True, tmin=0, tmax=15, ch_reference=['Cz', 'Pz'])
         """
-
         n_channels, n_samps = self.data.shape
 
         ref_data = self.data[self.info.ch_names.index(ch), :] # Canal de referencia
@@ -203,35 +201,39 @@ class EEG(RawSignal):
             plt.show()
 
     def laplacian_filter(self, dic_ref:str, plot:bool=False, channels_of_interest:list|str=['Fp1', 'Cz', 'Pz', 'Oz'],
-                         t_after_event:float=0.8, t_previous_event:float=-0.2, event_index:int=2):
+                         t_after_event:float=0.8, t_previous_event:float=-0.2, event_index:int=2, time_points:list[float]=[0.1, 0.2, 0.3, 0.4]):
         """
         Aplica filtro laplaciano espacial a la señal EEG y permite visualizar mapas topográficos y waveforms ERP.
 
         Parameters:
             dic_ref : str
                 Ruta al archivo JSON con la configuración de vecinos para el filtro laplaciano.
-            plot : bool, opcional
+            plot : bool, optional
                 Si True, muestra mapas topográficos y waveforms ERP.
-            channels_of_interest : list o str, opcional
+            channels_of_interest : list or str, optional
                 Lista o nombre de canales a mostrar en el gráfico de waveforms. Por defecto ['Fp1', 'Cz', 'Pz', 'Oz'].
-            t_after_event : float, opcional
+            t_after_event : float, optional
                 Tiempo en segundos después del evento para la ventana de análisis. Por defecto 0.8.
-            t_previous_event : float, opcional
+            t_previous_event : float, optional
                 Tiempo en segundos antes del evento para la ventana de análisis. Por defecto -0.2.
-            event_index : int, opcional
+            event_index : int, optional
                 Número de evento a analizar (según event_id). Por defecto 2.
+            time_points : list of float, optional
+                Lista de tiempos (en segundos) para mostrar líneas y mapas topográficos. Por defecto [0.1, 0.2, 0.3, 0.4].
 
         Raises:
             ValueError
-                Si el archivo de vecinos no existe, si event_index no está en event_id, o si los parámetros de tiempo son inválidos.
+                Si el archivo de vecinos no existe, si event_index no está en event_id, si los parámetros de tiempo son inválidos,
+                o si los canales de interés no existen.
 
         Notes:
             La señal laplaciana se guarda en el atributo `data_laplaciano` y la referencia actual en `reference`.
             Si existen eventos, se muestran mapas topográficos y waveforms para el evento seleccionado.
+            Las líneas verticales en el gráfico de waveforms indican los tiempos definidos en `time_points` y muestran el nombre del evento en la leyenda solo una vez.
 
         Examples:
             >>> eeg.laplacian_filter(dic_ref='vecinos.json', plot=True, event_index=2)
-            >>> eeg.laplacian_filter(dic_ref='vecinos.json', plot=True, channels_of_interest=['Cz', 'Pz'], t_previous_event=-0.1, t_after_event=0.5)
+            >>> eeg.laplacian_filter(dic_ref='vecinos.json', plot=True, channels_of_interest=['Cz', 'Pz'], t_previous_event=-0.1, t_after_event=0.5, time_points=[0.1, 0.3])
         """
         import json
         with open(dic_ref, "r") as f:
@@ -241,7 +243,6 @@ class EEG(RawSignal):
         self.info.ch_names = channels
 
         name_to_idx = {ch: idx for idx, ch in enumerate(self.info.ch_names)}
-
         laplace = np.zeros_like(self.data, dtype=float)
 
         for idx, ch_name in enumerate(self.info.ch_names):
@@ -274,9 +275,7 @@ class EEG(RawSignal):
 
             # Montaje estándar de MNE
             montage = mne.channels.make_standard_montage('standard_1005')
-
             mne_info = mne.create_info(ch_names=channels, sfreq=self.sfreq, ch_types=self.info.ch_types)
-
             mne_info.set_montage(montage)
 
             # Convierto las anotaciones propias a eventos MNE
@@ -300,7 +299,7 @@ class EEG(RawSignal):
                     # Filtro los datos en la banda de frecuencia
                     nyquist = self.sfreq / 2
 
-                                        # Orden, acote de freq, tipo
+                    # Orden, acote de freq, tipo
                     b, a = signal.butter(4, [low_freq/nyquist, high_freq/nyquist], btype='band')
                     filtered_data = signal.filtfilt(b, a, self.data_laplaciano, axis=1)
 
@@ -328,9 +327,12 @@ class EEG(RawSignal):
                 raw = mne.io.RawArray(self.data_laplaciano, mne_info)
 
                 # Ventana temporal para los epochs
-                tmin = t_previous_event  # 200 ms antes del evento
-                tmax = t_after_event   # 800 ms después del evento
-                baseline = (-0.2, 0)  # Período de línea base
+                if t_after_event <= 0 or t_previous_event >= 0 or t_after_event <= abs(t_previous_event):
+                    raise ValueError("Parámetros de tiempo inválidos. Asegúrese que t_after_event > 0, t_previous_event < 0 y t_after_event > |t_previous_event|")
+                
+                tmin = t_previous_event
+                tmax = t_after_event
+                baseline = (t_previous_event, 0)  # Período de línea base
 
                 # Extraigo los epochs alrededor de los eventos
                 epochs = mne.Epochs(raw, events, event_id=event_id, tmin=tmin, tmax=tmax, 
@@ -343,7 +345,7 @@ class EEG(RawSignal):
                 erp = epochs.average()
 
                 # Tiempos de interés para los mapas topográficos
-                time_points = [0.1, 0.2, 0.3, 0.4] # 100ms, 200ms...
+                time_points = time_points if isinstance(time_points, list) else [time_points]
 
                 n_times = len(time_points) 
                 n_cols = min(2, n_times)
@@ -388,6 +390,7 @@ class EEG(RawSignal):
                 # Canales de interés
                 channels_of_interest = channels_of_interest if isinstance(channels_of_interest, list) else [channels_of_interest]
                 
+                # Grafico cada canal
                 for ch in channels_of_interest:
                     if ch in erp.ch_names:
                         ch_idx = erp.ch_names.index(ch)
@@ -399,6 +402,7 @@ class EEG(RawSignal):
                 self.events = events
                 self.event_id = event_id
 
+                # Grafico cada Waveform
                 for t in time_points:
                     sample = int(t * self.sfreq)
                     idx_event = np.argmin(np.abs(events[:,0] - sample))
