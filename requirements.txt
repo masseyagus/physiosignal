@@ -4,3 +4,4 @@ matplotlib>=3.5
 scipy>=1.9
 pyqtgraph>=0.12
 PyQt5>=5.15
+mne>=1.9
