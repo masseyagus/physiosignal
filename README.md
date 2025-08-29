@@ -30,9 +30,9 @@ tif_2025/                  # Directorio raíz
 │   │   ├── logger_config.py
 │   ├── signals/
 │   │   ├── __init__.py
-│   │   ├── ecg.py         # Clase no implementada
-│   │   ├── eeg.py         # Clase no implementada
-│   │   ├── emg.py         # Clase no implementada
+│   │   ├── ecg.py         # En proceso
+│   │   ├── eeg.py         # En proceso
+│   │   ├── emg.py         # En proceso
 │   │   ├── raw.py
 │   ├── utils/
 │   │   ├── __init__.py
@@ -64,3 +64,4 @@ tif_2025/                  # Directorio raíz
   - SciPy
   - PyQtGraph
   - PyQt5
+  - MNE
