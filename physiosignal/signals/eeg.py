@@ -411,7 +411,7 @@ class EEG(RawSignal):
 
                     # Solo agrega el label si el evento no ha sido mostrado
                     if event_name not in eventos_mostrados:
-                        ax2.axvline(t, color='r', linestyle='--', alpha=0.7, label=f'Evento: {event_name}')
+                        ax2.axvline(t, color='r', linestyle='--', alpha=0.7, label=f'Evento: {event_num_to_name[event_index]}')
                         eventos_mostrados.add(event_name)
                     else:
                         ax2.axvline(t, color='r', linestyle='--', alpha=0.7)
