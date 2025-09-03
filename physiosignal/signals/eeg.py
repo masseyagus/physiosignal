@@ -7,28 +7,50 @@ from physiosignal.logger import log_config
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
+import mne
 
 def _normalize_ch_list(ch_names, montage='standard_1005'):
     """
-    Normaliza una lista de nombres de canales para que coincidan con los nombres
-    canónicos del montaje MNE (por ejemplo 'AF7', 'FCz', 'POz', 'Fp1', ...).
+    Normaliza una lista de nombres de canales EEG para que coincidan con los nombres canónicos 
+    del montaje MNE especificado.
 
-    Devuelve:
-      normalized_list: lista con los nombres (algunos igual que los originales si no hubo match)
-      rename_map: dict {old_name: canonical_name} con los renombrados aplicables
+    Parameters:
+        ch_names : list of str
+            Lista de nombres de canales a normalizar.
+        montage : str, optional
+            Nombre del montaje estándar de MNE a utilizar para la normalización. 
+            Por defecto 'standard_1005'.
 
-    Nota: si dos canales distintos mapearían al mismo nombre canónico, el primero
-    se renombra y el segundo se deja como estaba (evita duplicados).
+    Returns:
+        tuple: (normalized_list, rename_map)
+            normalized_list : list of str
+                Lista de nombres de canales normalizados.
+            rename_map : dict
+                Diccionario que mapea nombres originales a nombres canónicos {old_name: canonical_name}.
+
+    Notes:
+        La función utiliza una comparación insensible a mayúsculas/minúsculas y caracteres especiales
+        como guiones, puntos y espacios.
+        Si dos canales distintos mapearían al mismo nombre canónico, solo el primero se renombra
+        y el segundo mantiene su nombre original para evitar duplicados.
+        Los nombres de canales que no coinciden con ningún nombre canónico del montaje se mantienen
+        sin cambios.
+
+    Examples:
+        >>> normalized, mapping = _normalize_ch_list(['Fp1', 'fp2', 'C3'], 'standard_1005')
+        >>> print(normalized)
+        ['Fp1', 'Fp2', 'C3']
+        >>> print(mapping)
+        {'fp2': 'Fp2'}
     """
-    import mne
     def _key(s):
         return s.lower().replace('-', '').replace('.', '').replace(' ', '')
 
-    # obtener nombres canónicos del montaje
+    # Obtengo nombres canónicos del montaje
     mont = mne.channels.make_standard_montage(montage)
     canonical = mont.ch_names
 
-    # lookup para comparación segura
+    # Lookup para comparación segura
     lookup = { _key(c): c for c in canonical }
 
     normalized = []
@@ -40,18 +62,18 @@ def _normalize_ch_list(ch_names, montage='standard_1005'):
         if k in lookup:
             target = lookup[k]
             if target in used_targets:
-                # conflicto: ya usamos ese canonical antes -> no renombramos este canal
+                # Conflicto: ya usamos ese canonical antes -> no renombramos este canal
                 print(f"[normalize_ch_list] Conflicto: '{ch}' mapearía a '{target}', "
                       "pero ya está ocupado. Se mantiene el nombre original.")
                 normalized.append(ch)
             else:
-                # renombrar al canonical exacto
+                # Renombro al canonical exacto
                 normalized.append(target)
                 if target != ch:
                     rename_map[ch] = target
                 used_targets.add(target)
         else:
-            # no hay match con el montaje -> dejamos el nombre como estaba
+            # No hay match con el montaje -> dejamos el nombre como estaba
             normalized.append(ch)
 
     return normalized, rename_map
@@ -103,7 +125,6 @@ class EEG(RawSignal):
             reference : str, optional
                 Tipo de referencia inicial ('promedio', 'canal', 'laplaciano', etc.).
         """
-        
         super().__init__(data, sfreq, info, anotaciones, first_samp, see_log)
         self.reference = reference
 
@@ -322,7 +343,6 @@ class EEG(RawSignal):
         self.reference = 'laplaciano'
 
         if plot:
-            import mne
             from scipy import signal
 
             # Montaje estándar de MNE
@@ -629,8 +649,14 @@ class EEG(RawSignal):
         pass
 
     def _from_ann_to_events(self):
-        """Convierte las anotaciones propias a eventos en formato MNE"""
+        """
+        Convierte anotaciones a eventos en formato MNE.
 
+        Returns:
+            tuple: (events, event_id)
+                events: array de eventos en formato MNE [muestra, 0, código]
+                event_id: diccionario de mapeo {descripción: código}
+        """
         events, event_id = [], {}
         current_id = 1
 
