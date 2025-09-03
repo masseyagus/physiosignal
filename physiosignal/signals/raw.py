@@ -54,6 +54,9 @@ def _type_check(datos, info, anotaciones, first_samp) -> tuple:
     if not isinstance(first_samp, int):
         raise TypeError(f"first_samp debe ser un int, pero fue dado: {type(first_samp).__name__}")
     
+    if first_samp >= datos.shape[1]:
+        raise ValueError(f"first_samp debe ser menor a la cantidad de muestras: {datos.shape[1]}")
+    
     return datos, info, anotaciones, first_samp
 
 class RawSignal:
