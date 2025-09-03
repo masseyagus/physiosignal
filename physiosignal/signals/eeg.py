@@ -352,6 +352,8 @@ class EEG(RawSignal):
 
             # Convierto las anotaciones propias a eventos MNE
             events, event_id = self._from_ann_to_events()
+            self.events = events
+            self.event_id = event_id
 
             if len(events) == 0:
                 logging.info("No existen eventos dentro de las anotaciones. Se muestran los datos continuos")
@@ -410,7 +412,7 @@ class EEG(RawSignal):
                 epochs = mne.Epochs(raw, events, event_id=event_id, tmin=tmin, tmax=tmax, 
                                     baseline=baseline, preload=True, verbose=False)
                 
-                # Filtro por epocas: 1 es Derecha, 2 es Izquierda
+                # Filtro por epocas del evento seleccionado
                 epochs=epochs[events[:,2] == event_index]
                 
                 # Hallo el promedio (ERP) de los epochs
@@ -457,14 +459,13 @@ class EEG(RawSignal):
                 plt.show()
 
                 if waveform:
-
-                    # Segundo grtáfico: Waveforms de canales específicos
+                    # Segundo gráfico: Waveforms de canales específicos
                     fig2, ax2 = plt.subplots(figsize=(12, 6))
                     
                     # Canales de interés
                     channels_of_interest = channels_of_interest if isinstance(channels_of_interest, list) else [channels_of_interest]
                     
-                    # Grafico cada canal
+                    # Grafico waveform de cada canal de interés
                     for ch in channels_of_interest:
                         if ch in erp.ch_names:
                             ch_idx = erp.ch_names.index(ch)
@@ -473,10 +474,7 @@ class EEG(RawSignal):
                     event_num_to_name = {v: k for k, v in event_id.items()}
                     eventos_mostrados = set()
 
-                    self.events = events
-                    self.event_id = event_id
-
-                    # Grafico cada Waveform
+                    # Grafico las lineas temporales
                     for t in time_points:
                         sample = int(t * self.sfreq)
                         idx_event = np.argmin(np.abs(events[:,0] - sample))
@@ -492,6 +490,7 @@ class EEG(RawSignal):
 
                     ax2.axhline(0, color='k', linestyle='-', alpha=0.5)
                     ax2.axvline(0, color='k', linestyle='-', alpha=0.5)
+
                     ax2.set_xlabel('Tiempo (s)')
                     ax2.set_ylabel('Amplitud (µV)')
                     ax2.legend()
