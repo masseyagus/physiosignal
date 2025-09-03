@@ -159,7 +159,7 @@ class RawSignal:
 
         Returns:
             np.ndarray or (np.ndarray, np.ndarray):
-                - data: Array de forma (n_canales, n_muestras) o (n_muestras,) si un canal.
+                - data: Array de forma (n_canales, n_muestras) o (1, n_muestras) si un canal.
                 - time_vector: Vector de tiempos en s (solo si times=True).
 
         Raises:
@@ -241,9 +241,9 @@ class RawSignal:
             time_vector = np.arange(muestras) / self.sfreq + offset_sec  # Genero muestras uniformemente espaciadas y divido
                                                                          # por freq (sumo tiempo en caso de inicio distinto de 0)
 
-            return data, time_vector
+            return np.atleast_2d(data), time_vector
 
-        return data
+        return np.atleast_2d(data)
 
     def drop_channels(self, ch_names:str|list|tuple, inplace:bool=True) -> RawSignal:
         """
