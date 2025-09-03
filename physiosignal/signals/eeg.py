@@ -343,8 +343,7 @@ class EEG(RawSignal):
         self.reference = 'laplaciano'
 
         if plot:
-            from scipy import signal
-
+ 
             # Montaje estándar de MNE
             montage = mne.channels.make_standard_montage('standard_1005')
             mne_info = mne.create_info(ch_names=self.info.ch_names, sfreq=self.sfreq, ch_types=self.info.ch_types)
@@ -355,149 +354,10 @@ class EEG(RawSignal):
             self.events = events
             self.event_id = event_id
 
-            if len(events) == 0:
-                logging.info("No existen eventos dentro de las anotaciones. Se muestran los datos continuos")
+            erp = self._topomap(events, mne_info, event_id, t_after_event, t_previous_event, event_index, time_points)
 
-                freq_bands = {
-                        'Delta': (1, 4),
-                        'Theta': (4, 8),
-                        'Alpha': (8, 13),
-                        'Beta': (13, 30),
-                        'Gamma': (30, 45)
-                    } 
-                
-                fig, ax = plt.subplots(2, 3, figsize=(15,10))
-                ax = ax.ravel()
-
-                for idx, (band_name, (low_freq, high_freq)) in enumerate(freq_bands.items()):
-                    # Filtro los datos en la banda de frecuencia
-                    nyquist = self.sfreq / 2
-
-                    # Orden, acote de freq, tipo
-                    b, a = signal.butter(4, [low_freq/nyquist, high_freq/nyquist], btype='band')
-                    filtered_data = signal.filtfilt(b, a, self.data_ref, axis=1)
-
-                    # Hallo la potencia RMS para cada canal
-                    power = np.sqrt(np.mean(filtered_data**2, axis=1))
-                    
-                    # Genero el mapa topográfico para cada frecuencia
-                    im, _ = mne.viz.plot_topomap(power, mne_info, axes=ax[idx], show=False, sensors=True, 
-                                                contours=7, cmap='RdBu_r', res=64)
-
-                    ax[idx].set_title(f'{band_name} ({low_freq}-{high_freq}) Hz')
-
-                cbar = fig.colorbar(im, ax=ax[-1])
-                cbar.set_label(r'Potencia ($µV^2$)')
-
-                if len(freq_bands) < 6:
-                    fig.delaxes(ax[-1])
-                
-                plt.suptitle('Mapas Topográficos por Bandas de Frecuencia (Laplaciano)')
-                plt.tight_layout()
-                plt.show()
-            
-            else:
-                # Si hay eventos, creo objeto Raw de MNE con los datos laplacianos
-                raw = mne.io.RawArray(self.data_ref, mne_info)
-
-                # Ventana temporal para los epochs
-                if t_after_event <= 0 or t_previous_event >= 0 or t_after_event <= abs(t_previous_event):
-                    raise ValueError("Parámetros de tiempo inválidos. Asegúrese que t_after_event > 0, t_previous_event < 0 y t_after_event > |t_previous_event|")
-                
-                tmin = t_previous_event
-                tmax = t_after_event
-                baseline = (t_previous_event, 0)  # Período de línea base
-
-                # Extraigo los epochs alrededor de los eventos
-                epochs = mne.Epochs(raw, events, event_id=event_id, tmin=tmin, tmax=tmax, 
-                                    baseline=baseline, preload=True, verbose=False)
-                
-                # Filtro por epocas del evento seleccionado
-                epochs=epochs[events[:,2] == event_index]
-                
-                # Hallo el promedio (ERP) de los epochs
-                erp = epochs.average()
-
-                # Tiempos de interés para los mapas topográficos
-                time_points = time_points if isinstance(time_points, list) else [time_points]
-
-                n_times = len(time_points) 
-                n_cols = min(2, n_times)
-                n_rows = (n_times + n_cols -1) // n_cols
-
-                fig, ax = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 4*n_rows))
-
-                # Aseguro que ax sea siempre una lista para iterar
-                if n_times == 1:
-                    ax = [ax]
-                else:
-                    ax = ax.ravel()
-
-                # Itero sobre cada punto temporal de interés y genero el topomap
-                for idx, time_point in enumerate(time_points):
-                    if idx < len(ax):
-                        time_idx = np.argmin(np.abs(erp.times - time_point))
-
-                        # Hallo las amplitudes de los canales en ese tiempo
-                        amplitudes = erp.data[:, time_idx]
-
-                        # Genero el topomap para ese tiempo
-                        im, _ = mne.viz.plot_topomap(amplitudes, erp.info, axes=ax[idx],
-                                                        show=False, contours=7, cmap='RdBu_r', sensors=True)
-                        
-                        ax[idx].set_title(f'{time_point*1000:.0f} ms')
-                
-                cbar = fig.colorbar(im, ax=ax[-1], location='right', shrink=0.9) # shrink: multiplicador de la colorbar
-                cbar.set_label('Amplitud (µV)')
-
-                # Elimino los ejes que sobren
-                for j in range(idx+1, len(ax)):
-                    fig.delaxes(ax[j])
-
-                plt.suptitle('Mapas Topográficos de Amplitud ERP en Tiempos Específicos')
-                plt.tight_layout()
-                plt.show()
-
-                if waveform:
-                    # Segundo gráfico: Waveforms de canales específicos
-                    fig2, ax2 = plt.subplots(figsize=(12, 6))
-                    
-                    # Canales de interés
-                    channels_of_interest = channels_of_interest if isinstance(channels_of_interest, list) else [channels_of_interest]
-                    
-                    # Grafico waveform de cada canal de interés
-                    for ch in channels_of_interest:
-                        if ch in erp.ch_names:
-                            ch_idx = erp.ch_names.index(ch)
-                            ax2.plot(erp.times, erp.data[ch_idx], label=ch, linewidth=2)
-                    
-                    event_num_to_name = {v: k for k, v in event_id.items()}
-                    eventos_mostrados = set()
-
-                    # Grafico las lineas temporales
-                    for t in time_points:
-                        sample = int(t * self.sfreq)
-                        idx_event = np.argmin(np.abs(events[:,0] - sample))
-                        event_num = events[idx_event, 2]
-                        event_name = event_num_to_name.get(event_num, 'Desconocido')
-
-                        # Solo agrega el label si el evento no ha sido mostrado
-                        if event_name not in eventos_mostrados:
-                            ax2.axvline(t, color='r', linestyle='--', alpha=0.7, label='Puntos temporales')
-                            eventos_mostrados.add(event_name)
-                        else:
-                            ax2.axvline(t, color='r', linestyle='--', alpha=0.7)
-
-                    ax2.axhline(0, color='k', linestyle='-', alpha=0.5)
-                    ax2.axvline(0, color='k', linestyle='-', alpha=0.5)
-
-                    ax2.set_xlabel('Tiempo (s)')
-                    ax2.set_ylabel('Amplitud (µV)')
-                    ax2.legend()
-                    ax2.set_title(f'Waveforms ERP para Canales de Interés ({event_num_to_name[event_index]})')
-                    
-                    plt.tight_layout()
-                    plt.show()
+            if waveform and erp is not None:
+                self._plot_waveform(erp, events, event_id, channels_of_interest, time_points, event_index)
 
     def fft(self, pick_channel:list[str]|str='Cz', band:list[str]|str='Alpha', plot:bool=True, low_freq:float=None, high_freq:float=None):
         """
@@ -671,4 +531,182 @@ class EEG(RawSignal):
 
         return np.array(events), event_id
     
+    def _plot_waveform(self, erp, events, event_id, channels_of_interest, time_points, event_index):
+        """
+        Visualiza waveforms ERP para canales específicos en un evento determinado.
+        
+        Parameters:
+            erp: Objeto ERP de MNE
+            events: Array de eventos
+            event_id: Diccionario de mapeo de eventos
+            channels_of_interest: Lista de canales a visualizar
+            time_points: Lista de tiempos para líneas verticales
+            event_index: Índice del evento a visualizar
+        """
+        # Segundo gráfico: Waveforms de canales específicos
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        # Canales de interés
+        channels_of_interest = channels_of_interest if isinstance(channels_of_interest, list) else [channels_of_interest]
+        
+        # Grafico waveform de cada canal de interés
+        for ch in channels_of_interest:
+            if ch in erp.ch_names:
+                ch_idx = erp.ch_names.index(ch)
+                ax.plot(erp.times, erp.data[ch_idx], label=ch, linewidth=2)
+        
+        event_num_to_name = {v: k for k, v in event_id.items()}
+        eventos_mostrados = set()
+
+        # Grafico las lineas temporales
+        for t in time_points:
+            sample = int(t * self.sfreq)
+            idx_event = np.argmin(np.abs(events[:,0] - sample))
+            event_num = events[idx_event, 2]
+            event_name = event_num_to_name.get(event_num, 'Desconocido')
+
+            # Solo agrega el label si el evento no ha sido mostrado
+            if event_name not in eventos_mostrados:
+                ax.axvline(t, color='r', linestyle='--', alpha=0.7, label='Puntos temporales')
+                eventos_mostrados.add(event_name)
+            else:
+                ax.axvline(t, color='r', linestyle='--', alpha=0.7)
+
+        ax.axhline(0, color='k', linestyle='-', alpha=0.5)
+        ax.axvline(0, color='k', linestyle='-', alpha=0.5)
+
+        ax.set_xlabel('Tiempo (s)')
+        ax.set_ylabel('Amplitud (µV)')
+        ax.legend()
+        ax.set_title(f'Waveforms ERP para Canales de Interés ({event_num_to_name[event_index]})')
+        
+        plt.tight_layout()
+        plt.show()
+
+    def _topomap(self, events, mne_info, event_id, t_after_event, t_previous_event, event_index, time_points):
+        """
+        Genera mapas topográficos para visualización de datos EEG.
+        
+        Parameters:
+            events: Array de eventos en formato MNE
+            mne_info: Información de canales compatible con MNE
+            event_id: Diccionario de mapeo de eventos
+            t_after_event: Tiempo después del evento para análisis ERP
+            t_previous_event: Tiempo antes del evento para análisis ERP  
+            event_index: Índice del evento a visualizar
+            time_points: Lista de tiempos para mapas topográficos
+            
+        Returns:
+            erp: Objeto ERP de MNE o None si no hay eventos
+        """
+        from scipy import signal
+
+        # Si no hay eventos, muestro mapas topográficos de potencia RMS por bandas de frecuencia
+        if len(events) == 0:
+            logging.info("No existen eventos dentro de las anotaciones. Se muestran los datos continuos")
+
+            freq_bands = {
+                    'Delta': (1, 4),
+                    'Theta': (4, 8),
+                    'Alpha': (8, 13),
+                    'Beta': (13, 30),
+                    'Gamma': (30, 45)
+                } 
+            
+            fig, ax = plt.subplots(2, 3, figsize=(15,10))
+            ax = ax.ravel()
+
+            for idx, (band_name, (low_freq, high_freq)) in enumerate(freq_bands.items()):
+                # Filtro los datos en la banda de frecuencia
+                nyquist = self.sfreq / 2
+
+                # Orden, acote de freq, tipo
+                b, a = signal.butter(4, [low_freq/nyquist, high_freq/nyquist], btype='band')
+                filtered_data = signal.filtfilt(b, a, self.data_ref, axis=1)
+
+                # Hallo la potencia RMS para cada canal
+                power = np.sqrt(np.mean(filtered_data**2, axis=1))
+                
+                # Genero el mapa topográfico para cada frecuencia
+                im, _ = mne.viz.plot_topomap(power, mne_info, axes=ax[idx], show=False, sensors=True, 
+                                            contours=7, cmap='RdBu_r', res=64)
+
+                ax[idx].set_title(f'{band_name} ({low_freq}-{high_freq}) Hz')
+
+            cbar = fig.colorbar(im, ax=ax[-1])
+            cbar.set_label(r'Potencia ($µV^2$)')
+
+            if len(freq_bands) < 6:
+                fig.delaxes(ax[-1])
+            
+            plt.suptitle('Mapas Topográficos por Bandas de Frecuencia (Laplaciano)')
+            plt.tight_layout()
+            plt.show()
+
+            return None
+        
+        else:
+            # Si hay eventos, creo objeto Raw de MNE con los datos laplacianos
+            raw = mne.io.RawArray(self.data_ref, mne_info)
+
+            # Validación de parámetros de tiempo
+            if t_after_event <= 0 or t_previous_event >= 0 or t_after_event <= abs(t_previous_event):
+                raise ValueError("Parámetros de tiempo inválidos. Asegúrese que t_after_event > 0, t_previous_event < 0 y t_after_event > |t_previous_event|")
+            
+            tmin = t_previous_event
+            tmax = t_after_event
+            baseline = (t_previous_event, 0)  # Período de línea base
+
+            # Extraigo los epochs alrededor de los eventos
+            epochs = mne.Epochs(raw, events, event_id=event_id, tmin=tmin, tmax=tmax, 
+                                baseline=baseline, preload=True, verbose=False)
+            
+            # Filtro por epocas del evento seleccionado
+            epochs=epochs[events[:,2] == event_index]
+            
+            # Hallo el promedio (ERP) de los epochs
+            erp = epochs.average()
+
+            # Tiempos de interés para los mapas topográficos
+            time_points = time_points if isinstance(time_points, list) else [time_points]
+
+            n_times = len(time_points) 
+            n_cols = min(2, n_times)
+            n_rows = (n_times + n_cols -1) // n_cols
+
+            fig, ax = plt.subplots(n_rows, n_cols, figsize=(5*n_cols, 4*n_rows))
+
+            # Aseguro que ax sea siempre una lista para iterar
+            if n_times == 1:
+                ax = [ax]
+            else:
+                ax = ax.ravel()
+
+            # Itero sobre cada punto temporal de interés y genero el topomap
+            for idx, time_point in enumerate(time_points):
+                if idx < len(ax):
+                    time_idx = np.argmin(np.abs(erp.times - time_point))
+
+                    # Hallo las amplitudes de los canales en ese tiempo
+                    amplitudes = erp.data[:, time_idx]
+
+                    # Genero el topomap para ese tiempo
+                    im, _ = mne.viz.plot_topomap(amplitudes, erp.info, axes=ax[idx],
+                                                    show=False, contours=7, cmap='RdBu_r', sensors=True)
+                    
+                    ax[idx].set_title(f'{time_point*1000:.0f} ms')
+            
+            cbar = fig.colorbar(im, ax=ax[-1], location='right', shrink=0.9) # shrink: multiplicador de la colorbar
+            cbar.set_label('Amplitud (µV)')
+
+            # Elimino los ejes que sobren
+            for j in range(idx+1, len(ax)):
+                fig.delaxes(ax[j])
+
+            event_num_to_name = {v: k for k, v in event_id.items()}
+            plt.suptitle(f'Mapas Topográficos de Amplitud ERP en Tiempos Específicos - ({event_num_to_name[event_index]})')
+            plt.tight_layout()
+            plt.show()
+
+            return erp
 
