@@ -8,6 +8,54 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 
+def _normalize_ch_list(ch_names, montage='standard_1005'):
+    """
+    Normaliza una lista de nombres de canales para que coincidan con los nombres
+    canónicos del montaje MNE (por ejemplo 'AF7', 'FCz', 'POz', 'Fp1', ...).
+
+    Devuelve:
+      normalized_list: lista con los nombres (algunos igual que los originales si no hubo match)
+      rename_map: dict {old_name: canonical_name} con los renombrados aplicables
+
+    Nota: si dos canales distintos mapearían al mismo nombre canónico, el primero
+    se renombra y el segundo se deja como estaba (evita duplicados).
+    """
+    import mne
+    def _key(s):
+        return s.lower().replace('-', '').replace('.', '').replace(' ', '')
+
+    # obtener nombres canónicos del montaje
+    mont = mne.channels.make_standard_montage(montage)
+    canonical = mont.ch_names
+
+    # lookup para comparación segura
+    lookup = { _key(c): c for c in canonical }
+
+    normalized = []
+    rename_map = {}
+    used_targets = set()
+
+    for ch in ch_names:
+        k = _key(ch)
+        if k in lookup:
+            target = lookup[k]
+            if target in used_targets:
+                # conflicto: ya usamos ese canonical antes -> no renombramos este canal
+                print(f"[normalize_ch_list] Conflicto: '{ch}' mapearía a '{target}', "
+                      "pero ya está ocupado. Se mantiene el nombre original.")
+                normalized.append(ch)
+            else:
+                # renombrar al canonical exacto
+                normalized.append(target)
+                if target != ch:
+                    rename_map[ch] = target
+                used_targets.add(target)
+        else:
+            # no hay match con el montaje -> dejamos el nombre como estaba
+            normalized.append(ch)
+
+    return normalized, rename_map
+
 class EEG(RawSignal):
     """
     Representa una señal de Electroencefalografía (EEG) con herramientas específicas de análisis.
@@ -63,6 +111,19 @@ class EEG(RawSignal):
         log_config(see_log)  
         self._logger = logging.getLogger(__name__) # __name__ toma el nombre del submódulo
 
+        # Normalizo los nombres de los canales a formato estándar MNE
+        n_original = len(self.info.ch_names)
+        normalized, rename_map = _normalize_ch_list(self.info.ch_names, montage='standard_1005')
+        self.info.ch_names = normalized
+
+        if rename_map:
+            logging.info(f"Se aplicaron renombrados (original -> canónico):")
+            if len(rename_map) == n_original:
+                logging.info(f"Todos los canales fueron renombrados al estándar MNE. La nueva lista es: {self.info.ch_names}")
+            else:
+                for old_name, new_name in rename_map.items():
+                    logging.info("  %s -> %s", old_name, new_name)
+                
     def channel_reference(self, ch:str='Cz', plot:bool=False, tmin:int=10, tmax:int=20, ch_reference:list|str=['Fp1', 'Cz', 'Pz', 'Oz']):
         """
         Aplica referencia a un canal específico en la señal EEG.
@@ -95,7 +156,7 @@ class EEG(RawSignal):
         ref_data = self.data[self.info.ch_names.index(ch), :] # Canal de referencia
         new_data = self.data - ref_data[None, :] # Nueva referencia para todos los canales ref[None, :] inserta una nueva dimension
 
-        self.data_canal = new_data
+        self.data_ref = new_data
         self.reference = 'canal'
 
         if plot:
@@ -119,7 +180,7 @@ class EEG(RawSignal):
                 ax[i].plot(crop_t, self.data[ch_idx, tmin_samps:tmax_samps], alpha=0.6, label=f'{chs} Original', color="#0800FF")
                 
                 # Señal luego de cambio de referencia
-                ax[i].plot(crop_t, self.data_canal[ch_idx, tmin_samps:tmax_samps], alpha=0.6, label=f'{chs} Referenciado', color="#FF0000")
+                ax[i].plot(crop_t, self.data_ref[ch_idx, tmin_samps:tmax_samps], alpha=0.6, label=f'{chs} Referenciado', color="#FF0000")
 
                 ax[i].axhline(y=0, color="#373737", linestyle='--', alpha=0.7)
 
@@ -162,7 +223,7 @@ class EEG(RawSignal):
         ch_prom = np.mean(self.data, axis=0)
         avg_ref = self.data - ch_prom
 
-        self.avg_ref = avg_ref
+        self.data_ref = avg_ref
         self.reference = 'promedio'
 
         if plot:
@@ -187,7 +248,7 @@ class EEG(RawSignal):
                 ax[i].plot(crop_t, self.data[ch_idx, tmin_samps:tmax_samps], alpha=0.6, label=f'{chs} Original', color="#0800FF")
                 
                 # Señal luego de cambio de referencia
-                ax[i].plot(crop_t, self.avg_ref[ch_idx, tmin_samps:tmax_samps], alpha=0.6, label=f'{chs} Referenciado', color="#FF0000")
+                ax[i].plot(crop_t, self.data_ref[ch_idx, tmin_samps:tmax_samps], alpha=0.6, label=f'{chs} Referenciado', color="#FF0000")
 
                 ax[i].axhline(y=0, color="#000000", linestyle='--', alpha=0.7)
 
@@ -201,7 +262,8 @@ class EEG(RawSignal):
             plt.show()
 
     def laplacian_filter(self, dic_ref:str, plot:bool=False, channels_of_interest:list|str=['Fp1', 'Cz', 'Pz', 'Oz'],
-                         t_after_event:float=0.8, t_previous_event:float=-0.2, event_index:int=2, time_points:list[float]=[0.1, 0.2, 0.3, 0.4]):
+                         t_after_event:float=0.8, t_previous_event:float=-0.2, event_index:int=2, time_points:list[float]=[0.1, 0.2, 0.3, 0.4],
+                         waveform:bool=False):
         """
         Aplica filtro laplaciano espacial a la señal EEG y permite visualizar mapas topográficos y waveforms ERP.
 
@@ -239,9 +301,6 @@ class EEG(RawSignal):
         with open(dic_ref, "r") as f:
             ref_dic = json.load(f)
 
-        channels = [ch.upper() for ch in ref_dic]
-        self.info.ch_names = channels
-
         name_to_idx = {ch: idx for idx, ch in enumerate(self.info.ch_names)}
         laplace = np.zeros_like(self.data, dtype=float)
 
@@ -259,23 +318,16 @@ class EEG(RawSignal):
             else:
                 laplace[idx, :] = self.data[idx, :].astype(float)
 
-        self.data_laplaciano = laplace
+        self.data_ref = laplace
         self.reference = 'laplaciano'
 
         if plot:
             import mne
             from scipy import signal
 
-            # Diccionario para renombrar canales a formato estándar MNE
-            dic = {'FP1':'Fp1', 'FPZ':'Fpz', 'FP2':'Fp2', 
-                    'FZ':'Fz', 'FCZ':'FCz', 'CZ':'Cz', 'CPZ':'CPz', 'PZ':'Pz', 
-                    'POZ':'POz', 'OZ':'Oz'}
-            
-            channels = self.info.rename_channels(dic).ch_names
-
             # Montaje estándar de MNE
             montage = mne.channels.make_standard_montage('standard_1005')
-            mne_info = mne.create_info(ch_names=channels, sfreq=self.sfreq, ch_types=self.info.ch_types)
+            mne_info = mne.create_info(ch_names=self.info.ch_names, sfreq=self.sfreq, ch_types=self.info.ch_types)
             mne_info.set_montage(montage)
 
             # Convierto las anotaciones propias a eventos MNE
@@ -301,7 +353,7 @@ class EEG(RawSignal):
 
                     # Orden, acote de freq, tipo
                     b, a = signal.butter(4, [low_freq/nyquist, high_freq/nyquist], btype='band')
-                    filtered_data = signal.filtfilt(b, a, self.data_laplaciano, axis=1)
+                    filtered_data = signal.filtfilt(b, a, self.data_ref, axis=1)
 
                     # Hallo la potencia RMS para cada canal
                     power = np.sqrt(np.mean(filtered_data**2, axis=1))
@@ -324,7 +376,7 @@ class EEG(RawSignal):
             
             else:
                 # Si hay eventos, creo objeto Raw de MNE con los datos laplacianos
-                raw = mne.io.RawArray(self.data_laplaciano, mne_info)
+                raw = mne.io.RawArray(self.data_ref, mne_info)
 
                 # Ventana temporal para los epochs
                 if t_after_event <= 0 or t_previous_event >= 0 or t_after_event <= abs(t_previous_event):
@@ -384,50 +436,113 @@ class EEG(RawSignal):
                 plt.tight_layout()
                 plt.show()
 
-                # Segundo grtáfico: Waveforms de canales específicos
-                fig2, ax2 = plt.subplots(figsize=(12, 6))
-                
-                # Canales de interés
-                channels_of_interest = channels_of_interest if isinstance(channels_of_interest, list) else [channels_of_interest]
-                
-                # Grafico cada canal
-                for ch in channels_of_interest:
-                    if ch in erp.ch_names:
-                        ch_idx = erp.ch_names.index(ch)
-                        ax2.plot(erp.times, erp.data[ch_idx], label=ch, linewidth=2)
-                
-                event_num_to_name = {v: k for k, v in event_id.items()}
-                eventos_mostrados = set()
+                if waveform:
 
-                self.events = events
-                self.event_id = event_id
+                    # Segundo grtáfico: Waveforms de canales específicos
+                    fig2, ax2 = plt.subplots(figsize=(12, 6))
+                    
+                    # Canales de interés
+                    channels_of_interest = channels_of_interest if isinstance(channels_of_interest, list) else [channels_of_interest]
+                    
+                    # Grafico cada canal
+                    for ch in channels_of_interest:
+                        if ch in erp.ch_names:
+                            ch_idx = erp.ch_names.index(ch)
+                            ax2.plot(erp.times, erp.data[ch_idx], label=ch, linewidth=2)
+                    
+                    event_num_to_name = {v: k for k, v in event_id.items()}
+                    eventos_mostrados = set()
 
-                # Grafico cada Waveform
-                for t in time_points:
-                    sample = int(t * self.sfreq)
-                    idx_event = np.argmin(np.abs(events[:,0] - sample))
-                    event_num = events[idx_event, 2]
-                    event_name = event_num_to_name.get(event_num, 'Desconocido')
+                    self.events = events
+                    self.event_id = event_id
 
-                    # Solo agrega el label si el evento no ha sido mostrado
-                    if event_name not in eventos_mostrados:
-                        ax2.axvline(t, color='r', linestyle='--', alpha=0.7, label=f'Evento: {event_num_to_name[event_index]}')
-                        eventos_mostrados.add(event_name)
-                    else:
-                        ax2.axvline(t, color='r', linestyle='--', alpha=0.7)
+                    # Grafico cada Waveform
+                    for t in time_points:
+                        sample = int(t * self.sfreq)
+                        idx_event = np.argmin(np.abs(events[:,0] - sample))
+                        event_num = events[idx_event, 2]
+                        event_name = event_num_to_name.get(event_num, 'Desconocido')
 
-                ax2.axhline(0, color='k', linestyle='-', alpha=0.5)
-                ax2.axvline(0, color='k', linestyle='-', alpha=0.5)
-                ax2.set_xlabel('Tiempo (s)')
-                ax2.set_ylabel('Amplitud (µV)')
-                ax2.legend()
-                ax2.set_title(f'Waveforms ERP para Canales de Interés ({event_num_to_name[event_index]})')
+                        # Solo agrega el label si el evento no ha sido mostrado
+                        if event_name not in eventos_mostrados:
+                            ax2.axvline(t, color='r', linestyle='--', alpha=0.7, label='Puntos temporales')
+                            eventos_mostrados.add(event_name)
+                        else:
+                            ax2.axvline(t, color='r', linestyle='--', alpha=0.7)
+
+                    ax2.axhline(0, color='k', linestyle='-', alpha=0.5)
+                    ax2.axvline(0, color='k', linestyle='-', alpha=0.5)
+                    ax2.set_xlabel('Tiempo (s)')
+                    ax2.set_ylabel('Amplitud (µV)')
+                    ax2.legend()
+                    ax2.set_title(f'Waveforms ERP para Canales de Interés ({event_num_to_name[event_index]})')
+                    
+                    plt.tight_layout()
+                    plt.show()
+
+    def fft(self, pick_channel:list[str]|str='Cz', band:list[str]|str='Alpha', plot:bool=True):
+
+        from scipy.fft import fft, fftfreq
+
+        if not hasattr(self, 'data_ref'):
+            raise ValueError("Primero debe aplicar un método de referencia (canal, promedio, laplaciano) antes de calcular la FFT.")
+        data = np.atleast_2d(self.data_ref)
+
+        if isinstance(pick_channel, str):
+            if pick_channel not in self.info.ch_names:
+                raise ValueError(f"El canal {pick_channel} no existe en la señal.")
+            
+            ch_idx = [self.info.ch_names.index(pick_channel)]
+
+        elif isinstance(pick_channel, list):
+            for ch in pick_channel:
+                if ch not in self.info.ch_names:
+                    raise ValueError(f"El canal {ch} no existe en la señal.")
                 
-                plt.tight_layout()
+            ch_idx = [self.info.ch_names.index(ch) for ch in pick_channel]
+
+        n_channels, n_samps = self.data_ref.shape
+        data_ch = data[ch_idx, :]
+
+        fft_analysis = fft(data_ch, axis=1)
+        fft_freq = fftfreq(n_samps, d=1/self.sfreq)
+
+        # Magnitud al cuadrado y normalizada
+        psd = (np.abs(fft_analysis) ** 2) / n_samps
+
+        # Quedarse solo con frecuencias positivas
+        pos_mask = fft_freq >= 0
+
+        self.fft_psd = 10 * np.log10(psd[:, pos_mask] + 1e-20)
+        self.fft_freq = fft_freq[pos_mask]
+
+        if plot:
+
+            freq_bands = {
+                'Delta': (1, 4),
+                'Theta': (4, 8),
+                'Alpha': (8, 13),
+                'Beta': (13, 30),
+                'Gamma': (30, 45)
+            } 
+
+            band = band.capitalize() if isinstance(band, str) else [b.capitalize() for b in band]
+
+            for b in band:
+                if b not in freq_bands:
+                    raise ValueError(f"La banda {b} no es válida. Use: {list(freq_bands.keys())}")
+                
+                low_freq, high_freq = freq_bands[b]  
+
+                band_mask = (self.fft_freq >= 1) & (self.fft_freq <= 50)
+
+                fig, ax = plt.subplots(figsize=(10, 5))
+
+                ax.plot(self.fft_freq[band_mask], self.fft_psd[0,band_mask], color="#0800FF", label=f'FFT {pick_channel}')
+                ax.set_title(f'Espectro de Fourier - Canal {pick_channel} - Banda {b} ({low_freq}-{high_freq} Hz)')
+                ax.set_xlabel('Frecuencia (Hz)')
+
                 plt.show()
-
-    def fft(self):
-        pass
 
     def freq_time(self):
         pass
@@ -452,3 +567,5 @@ class EEG(RawSignal):
             events.append([samples, 0, event_id[description]])
 
         return np.array(events), event_id
+    
+
