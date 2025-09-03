@@ -283,40 +283,51 @@ class EEG(RawSignal):
             plt.show()
 
     def laplacian_filter(self, dic_ref:str, plot:bool=False, channels_of_interest:list|str=['Fp1', 'Cz', 'Pz', 'Oz'],
-                         t_after_event:float=0.8, t_previous_event:float=-0.2, event_index:int=2, time_points:list[float]=[0.1, 0.2, 0.3, 0.4],
-                         waveform:bool=False):
+                         t_after_event:float=0.8, t_previous_event:float=-0.2, event_index:int=2, 
+                         time_points:list[float]=[0.1, 0.2, 0.3, 0.4], waveform:bool=False):
         """
-        Aplica filtro laplaciano espacial a la señal EEG y permite visualizar mapas topográficos y waveforms ERP.
+        Aplica filtro laplaciano espacial a la señal EEG.
 
         Parameters:
             dic_ref : str
                 Ruta al archivo JSON con la configuración de vecinos para el filtro laplaciano.
             plot : bool, optional
-                Si True, muestra mapas topográficos y waveforms ERP.
+                Si True, muestra visualizaciones (mapas topográficos y/o waveforms).
             channels_of_interest : list or str, optional
-                Lista o nombre de canales a mostrar en el gráfico de waveforms. Por defecto ['Fp1', 'Cz', 'Pz', 'Oz'].
+                Canales a mostrar en waveforms. Por defecto ['Fp1', 'Cz', 'Pz', 'Oz'].
             t_after_event : float, optional
-                Tiempo en segundos después del evento para la ventana de análisis. Por defecto 0.8.
+                Tiempo después del evento para análisis (segundos). Por defecto 0.8.
             t_previous_event : float, optional
-                Tiempo en segundos antes del evento para la ventana de análisis. Por defecto -0.2.
+                Tiempo antes del evento para análisis (segundos). Por defecto -0.2.
             event_index : int, optional
-                Número de evento a analizar (según event_id). Por defecto 2.
+                ID del evento a analizar. Por defecto 2.
             time_points : list of float, optional
-                Lista de tiempos (en segundos) para mostrar líneas y mapas topográficos. Por defecto [0.1, 0.2, 0.3, 0.4].
+                Tiempos específicos para visualización (segundos). Por defecto [0.1, 0.2, 0.3, 0.4].
+            waveform : bool, optional
+                Si True, muestra waveforms ademas de mapas topográficos.
+
+        Returns:
+            None
 
         Raises:
-            ValueError
-                Si el archivo de vecinos no existe, si event_index no está en event_id, si los parámetros de tiempo son inválidos,
-                o si los canales de interés no existen.
+            ValueError: Si el archivo JSON no existe o parámetros son inválidos.
 
         Notes:
-            La señal laplaciana se guarda en el atributo `data_laplaciano` y la referencia actual en `reference`.
-            Si existen eventos, se muestran mapas topográficos y waveforms para el evento seleccionado.
-            Las líneas verticales en el gráfico de waveforms indican los tiempos definidos en `time_points` y muestran el nombre del evento en la leyenda solo una vez.
+            - Aplica filtro laplaciano usando configuración de vecinos del JSON
+            - Si plot=True: muestra mapas topográficos de potencia por bandas (sin eventos)
+            o mapas ERP en tiempos específicos (con eventos)
+            - Si waveform=True y hay eventos: muestra waveforms de canales seleccionados
+            - Los resultados se guardan en data_ref y reference
 
         Examples:
-            >>> eeg.laplacian_filter(dic_ref='vecinos.json', plot=True, event_index=2)
-            >>> eeg.laplacian_filter(dic_ref='vecinos.json', plot=True, channels_of_interest=['Cz', 'Pz'], t_previous_event=-0.1, t_after_event=0.5, time_points=[0.1, 0.3])
+            >>> # Filtro sin visualización
+            >>> eeg.laplacian_filter('vecinos.json')
+            
+            >>> # Filtro con visualización completa
+            >>> eeg.laplacian_filter('vecinos.json', plot=True, waveform=True)
+            
+            >>> # Filtro visualizando canales específicos
+            >>> eeg.laplacian_filter('vecinos.json', plot=True, channels_of_interest=['Cz', 'Pz'])
         """
         import json
         with open(dic_ref, "r") as f:
@@ -510,6 +521,9 @@ class EEG(RawSignal):
     def _from_ann_to_events(self):
         """
         Convierte anotaciones a eventos en formato MNE.
+        
+        Asume que las anotaciones están en tiempo absoluto respecto al inicio
+        original del registro. Ajusta automáticamente restando first_samp.
 
         Returns:
             tuple: (events, event_id)
@@ -521,13 +535,16 @@ class EEG(RawSignal):
 
         for onset, duration, description in zip(self.anotaciones.onset, self.anotaciones.duration, self.anotaciones.description):
 
-            samples = int(onset * self.sfreq)
+            samples = int(onset * self.sfreq) - self.first_samp
 
-            if description not in event_id:
-                event_id[description] = current_id
-                current_id += 1
-
-            events.append([samples, 0, event_id[description]])
+            # Verificar que la muestra esté dentro del rango actual
+            if 0 <= samples < self.data.shape[1]:
+                if description not in event_id:
+                    event_id[description] = current_id
+                    current_id += 1
+                events.append([samples, 0, event_id[description]])
+            else:
+                logging.warning(f"Evento en muestra {samples + self.first_samp} fuera del rango actual")
 
         return np.array(events), event_id
     
@@ -573,7 +590,7 @@ class EEG(RawSignal):
                 ax.axvline(t, color='r', linestyle='--', alpha=0.7)
 
         ax.axhline(0, color='k', linestyle='-', alpha=0.5)
-        ax.axvline(0, color='k', linestyle='-', alpha=0.5)
+        ax.axvline(0, color='k', linestyle='-', alpha=0.6, label='Evento')
 
         ax.set_xlabel('Tiempo (s)')
         ax.set_ylabel('Amplitud (µV)')
