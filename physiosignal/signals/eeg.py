@@ -480,12 +480,49 @@ class EEG(RawSignal):
                     plt.tight_layout()
                     plt.show()
 
-    def fft(self, pick_channel:list[str]|str='Cz', band:list[str]|str='Alpha', plot:bool=True):
+    def fft(self, pick_channel:list[str]|str='Cz', band:list[str]|str='Alpha', plot:bool=True, low_freq:float=None, high_freq:float=None):
+        """
+        Calcula la Transformada Rápida de Fourier (FFT) usando el método de Welch para la señal EEG y permite 
+        visualizar el espectro de potencia para canales y bandas de frecuencia específicos.
 
-        from scipy.fft import fft, fftfreq
+        Parameters:
+            pick_channel : list or str, optional
+                Lista o nombre de canales a analizar. Por defecto 'Cz'.
+            band : list or str, optional
+                Lista o nombre de bandas de frecuencia predefinidas a visualizar. 
+                Opciones: 'Delta', 'Theta', 'Alpha', 'Beta', 'Gamma'. Por defecto 'Alpha'.
+            plot : bool, optional
+                Si True, muestra gráficos del espectro de potencia. Por defecto True.
+            low_freq : float, optional
+                Límite inferior de frecuencia personalizado (Hz). Si se especifica junto con high_freq, 
+                ignora las bandas predefinidas. Por defecto None.
+            high_freq : float, optional
+                Límite superior de frecuencia personalizado (Hz). Si se especifica junto con low_freq, 
+                ignora las bandas predefinidas. Por defecto None.
+
+        Raises:
+            ValueError
+                Si no se ha aplicado previamente un método de referencia, si los canales especificados no existen,
+                o si las bandas de frecuencia no son válidas.
+
+        Notes:
+            El espectro de potencia se calcula usando el método de Welch y se convierte a escala logarítmica (dB).
+            Los resultados se guardan en los atributos `fft_psd` (densidad espectral de potencia) y `fft_freq` (frecuencias).
+            Si se especifican low_freq y high_freq, se ignora el parámetro band y se usa el rango de frecuencia personalizado.
+            El gráfico muestra el espectro de potencia suavizado para cada canal seleccionado.
+
+        Examples:
+            >>> eeg.fft(pick_channel='Cz', band='Alpha')
+            >>> eeg.fft(pick_channel=['Cz', 'Pz'], band=['Alpha', 'Beta'])
+            >>> eeg.fft(pick_channel='Oz', low_freq=8.0, high_freq=12.0)
+        """
+        from scipy.signal import welch
+        import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
 
         if not hasattr(self, 'data_ref'):
             raise ValueError("Primero debe aplicar un método de referencia (canal, promedio, laplaciano) antes de calcular la FFT.")
+        
         data = np.atleast_2d(self.data_ref)
 
         if isinstance(pick_channel, str):
@@ -493,6 +530,7 @@ class EEG(RawSignal):
                 raise ValueError(f"El canal {pick_channel} no existe en la señal.")
             
             ch_idx = [self.info.ch_names.index(pick_channel)]
+            channel_names = [pick_channel]
 
         elif isinstance(pick_channel, list):
             for ch in pick_channel:
@@ -500,24 +538,15 @@ class EEG(RawSignal):
                     raise ValueError(f"El canal {ch} no existe en la señal.")
                 
             ch_idx = [self.info.ch_names.index(ch) for ch in pick_channel]
+            channel_names = pick_channel
 
-        n_channels, n_samps = self.data_ref.shape
         data_ch = data[ch_idx, :]
+        freqs, psd = welch(data_ch, fs=self.sfreq, nperseg=1024, axis=1)
 
-        fft_analysis = fft(data_ch, axis=1)
-        fft_freq = fftfreq(n_samps, d=1/self.sfreq)
-
-        # Magnitud al cuadrado y normalizada
-        psd = (np.abs(fft_analysis) ** 2) / n_samps
-
-        # Quedarse solo con frecuencias positivas
-        pos_mask = fft_freq >= 0
-
-        self.fft_psd = 10 * np.log10(psd[:, pos_mask] + 1e-20)
-        self.fft_freq = fft_freq[pos_mask]
+        self.fft_psd = 10 * np.log10(psd + 1e-12)
+        self.fft_freq = freqs
 
         if plot:
-
             freq_bands = {
                 'Delta': (1, 4),
                 'Theta': (4, 8),
@@ -526,22 +555,71 @@ class EEG(RawSignal):
                 'Gamma': (30, 45)
             } 
 
-            band = band.capitalize() if isinstance(band, str) else [b.capitalize() for b in band]
-
-            for b in band:
-                if b not in freq_bands:
-                    raise ValueError(f"La banda {b} no es válida. Use: {list(freq_bands.keys())}")
+            # Determino si se están usando bandas predefinidas o personalizadas
+            using_custom_band = low_freq is not None and high_freq is not None # Bool: True o False
+            
+            if using_custom_band:
+                # Uso frecuencias personalizadas
+                band_list = [('Personalizado', low_freq, high_freq)]
+            else:
+                # Uso bandas predefinidas
+                band = [band.capitalize()] if isinstance(band, str) else [b.capitalize() for b in band]
+                band_list = []
                 
-                low_freq, high_freq = freq_bands[b]  
+                for b in band:
+                    if b not in freq_bands:
+                        raise ValueError(f"La banda {b} no es válida. Use: {list(freq_bands.keys())}")
+                    # Tupla con (nombre, low_freq, high_freq)
+                    band_list.append((b, freq_bands[b][0], freq_bands[b][1]))
 
-                band_mask = (self.fft_freq >= 1) & (self.fft_freq <= 50)
+            # Configuración de colores
+            if len(ch_idx) <= 8:
+                distinct_colors = [
+                    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
+                    '#9467bd', '#8c564b', '#e377c2', '#7f7f7f'
+                ]
+                colors = distinct_colors[:len(ch_idx)]
+            else:
+                colormap = cm.get_cmap('tab20', len(ch_idx))
+                colors = [mcolors.to_hex(colormap(i)) for i in range(len(ch_idx))]
+
+            for band_name, band_low_freq, band_high_freq in band_list:
+                # Uso las frecuencias adecuadas (personalizadas o predefinidas)
+                current_low_freq = low_freq if using_custom_band else band_low_freq
+                current_high_freq = high_freq if using_custom_band else band_high_freq
+                
+                band_mask = (self.fft_freq >= current_low_freq) & (self.fft_freq <= current_high_freq)
 
                 fig, ax = plt.subplots(figsize=(10, 5))
 
-                ax.plot(self.fft_freq[band_mask], self.fft_psd[0,band_mask], color="#0800FF", label=f'FFT {pick_channel}')
-                ax.set_title(f'Espectro de Fourier - Canal {pick_channel} - Banda {b} ({low_freq}-{high_freq} Hz)')
-                ax.set_xlabel('Frecuencia (Hz)')
+                for i, channel_idx in enumerate(ch_idx):
+                    channel_name = self.info.ch_names[channel_idx]
+                    y_data = self.fft_psd[i, band_mask]
 
+                    from scipy.ndimage import gaussian_filter1d
+                    y_smooth = gaussian_filter1d(y_data, sigma=0.8)
+
+                    ax.plot(self.fft_freq[band_mask], y_smooth, color=colors[i], label=f'Canal {channel_name}', linewidth=2)
+
+                # Crear título apropiado
+                if len(channel_names) > 3:
+                    channel_title = f"{len(channel_names)} canales"
+                else:
+                    channel_title = ', '.join(channel_names)
+                
+                if using_custom_band:
+                    title = f'Espectro de Potencia - {channel_title} - Banda Personalizada ({current_low_freq}-{current_high_freq} Hz)'
+                else:
+                    title = f'Espectro de Potencia - {channel_title} - Banda {band_name} ({current_low_freq}-{current_high_freq} Hz)'
+                
+                ax.set_title(title)
+                ax.set_xlabel('Frecuencia (Hz)')
+                ax.set_ylabel('Densidad Espectral de Potencia (dB)')
+                ax.legend(loc='upper right', fontsize=10, framealpha=0.9)
+                
+                ax.grid(True, alpha=0.3)
+                
+                plt.tight_layout()
                 plt.show()
 
     def freq_time(self):
