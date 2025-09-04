@@ -241,7 +241,7 @@ class Info:
     #               manteniendo solo los especificados en el parámetro select.
     #     """
 
-    def _select(self, select):
+    def _select(self, select) -> None:
         """
         Filtra los canales conservando solo los especificados en `select`,
         respetando el orden pedido en `select` y sin reordenar inesperadamente.
