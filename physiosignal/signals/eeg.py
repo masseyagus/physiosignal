@@ -548,7 +548,7 @@ class EEG(RawSignal):
                 plt.tight_layout()
                 plt.show()
 
-    def freq_time(self, low_freq:float=1, high_freq:float=60.0, channels:list[str]|str ='Cz', separate_events:bool=True):
+    def freq_time(self, low_freq:float=1, high_freq:float=60.0, channels:list[str]|str ='Cz', separate_events:bool=True, color:str='magma'):
         """
         Realiza análisis tiempo-frecuencia de los datos EEG utilizando wavelets de Morlet.
 
@@ -567,10 +567,13 @@ class EEG(RawSignal):
             separate_events : bool, optional
                 Si True, genera gráficos separados para cada tipo de evento (por defecto True).
                 Si False, genera un único gráfico con todos los eventos promediados.
+            color: str, optional
+                Color de visulización del gráfico (por defecto 'magma')
 
         Returns:
-            power : mne.time_frequency.AverageTFR
-                Objeto con los resultados del análisis tiempo-frecuencia.
+            power : mne.time_frequency.AverageTFR or dict
+                Si separate_events=True, retorna un diccionario con objetos AverageTFR para cada evento.
+                Si separate_events=False, retorna un único objeto AverageTFR con todos los eventos.
 
         Raises:
             ValueError:
@@ -583,14 +586,17 @@ class EEG(RawSignal):
             - Aplica corrección de línea base usando el período pre-estímulo (-0.2 a 0 segundos).
             - El cálculo se realiza con use_fft=True para mejor rendimiento computacional.
             - Los resultados se muestran como cambio porcentual respecto a la línea base.
+            - Evita mensajes de log ejecutando `mne.set_log_level('ERROR')` antes.
 
         Examples:
             >>> # Análisis para todos los eventos en el canal Cz
             >>> power = eeg_signal.freq_time(low_freq=1, high_freq=40, channels='Cz', separate_events=False)
             >>>
             >>> # Análisis separado por eventos para múltiples canales
-            >>> power = eeg_signal.freq_time(low_freq=4, high_freq=30, 
-            ...                             channels=['C3', 'C4', 'Fz'], separate_events=True)
+            >>> power_dict = eeg_signal.freq_time(low_freq=4, high_freq=30, 
+            ...                                  channels=['C3', 'C4', 'Fz'], separate_events=True)
+            >>> # Acceder a los resultados para un evento específico
+            >>> power_left = power_dict['left']
             >>>
             >>> # Análisis específico para banda beta en canal Pz
             >>> power = eeg_signal.freq_time(low_freq=13, high_freq=30, channels='Pz', separate_events=True)
@@ -629,20 +635,29 @@ class EEG(RawSignal):
                 raise ValueError(f"El canal {ch} no se existe dentro de los datos. Canales disponibles: {self.info.ch_names}")
 
         if separate_events:
+            power_dict = {}
             for event_name, event_code in event_id.items():
                 epochs_event = epochs[events[:,2] == event_code]
-                power = tfr_morlet(epochs_event, freqs=freqs, n_cycles=n_cycles, return_itc=False, average=True)
+                power = tfr_morlet(epochs_event, freqs=freqs, n_cycles=n_cycles, return_itc=False, average=True, use_fft=True)
                 power.apply_baseline(baseline=(-0.2, 0), mode='percent')
 
-                power.plot(picks=channels, title=f'Tiempo-Frecuencia (TFR) - Evento: {event_name.capitalize()}', show=True, 
-                        cmap='magma')
+                power_dict[event_name] = power
+
+                for i in range(len(channels)):
+                    power.plot(picks=channels[i], title=f'Tiempo-Frecuencia (TFR) - Evento: {event_name.capitalize()}, Canal: {channels[i]}', 
+                               show=True, cmap=color)
+            
+            return power_dict
         else:
-            power = tfr_morlet(epochs, freqs=freqs, n_cycles=n_cycles, return_itc=False, average=True)
+            power = tfr_morlet(epochs, freqs=freqs, n_cycles=n_cycles, return_itc=False, average=True, use_fft=True)
 
             power.apply_baseline(baseline=(-0.2, 0), mode='percent') # percent para cambio porcentual
-
-            power.plot(picks=channels, title=f'Tiempo-Frecuencia (TFR) en {','.join(channels)}', show=True, 
-                    cmap='magma')
+            
+            for ch in channels:
+                power.plot(picks=ch, title=f'Tiempo-Frecuencia (TFR) en {ch}', show=True, 
+                        cmap=color)
+                
+            return power
 
     def hilbert(self):
         pass
