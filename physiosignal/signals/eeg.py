@@ -151,7 +151,7 @@ class EEG(RawSignal):
         """
         Aplica referencia a un canal específico en la señal EEG.
 
-        Parameters:
+        Args:
             ch : str, optional
                 Nombre del canal de referencia. Por defecto 'Cz'.
             plot : bool, optional
@@ -227,7 +227,7 @@ class EEG(RawSignal):
         """
         Aplica referencia al promedio de todos los canales en la señal EEG.
 
-        Parameters:
+        Args:
             plot : bool, optional
                 Si True, muestra la comparación gráfica entre la señal original y la referenciada.
             tmin : int, optional
@@ -303,7 +303,7 @@ class EEG(RawSignal):
         """
         Aplica filtro laplaciano espacial a la señal EEG.
 
-        Parameters:
+        Args:
             dic_ref : str
                 Ruta al archivo JSON con la configuración de vecinos para el filtro laplaciano.
             plot : bool, optional
@@ -410,7 +410,7 @@ class EEG(RawSignal):
         Calcula la Transformada Rápida de Fourier (FFT) usando el método de Welch para la señal EEG y permite 
         visualizar el espectro de potencia para canales y bandas de frecuencia específicos.
 
-        Parameters:
+        Args:
             pick_channel : list or str, optional
                 Lista o nombre de canales a analizar. Por defecto 'Cz'.
             band : list or str, optional
@@ -449,6 +449,7 @@ class EEG(RawSignal):
             raise ValueError("Primero debe aplicar un método de referencia (canal, promedio, laplaciano) antes de calcular la FFT.")
         
         data = np.atleast_2d(self.data_ref)
+        pick_channel, _ = _normalize_ch_list(pick_channel, montage='standard_1005')
 
         if isinstance(pick_channel, str):
             if pick_channel not in self.info.ch_names:
@@ -547,8 +548,101 @@ class EEG(RawSignal):
                 plt.tight_layout()
                 plt.show()
 
-    def freq_time(self):
-        pass
+    def freq_time(self, low_freq:float=1, high_freq:float=60.0, channels:list[str]|str ='Cz', separate_events:bool=True):
+        """
+        Realiza análisis tiempo-frecuencia de los datos EEG utilizando wavelets de Morlet.
+
+        Este método calcula y visualiza la potencia tiempo-frecuencia de las señales EEG,
+        permitiendo analizar cómo diferentes bandas de frecuencia varían en el tiempo
+        en respuesta a eventos específicos.
+
+        Args:
+            low_freq : float, optional
+                Frecuencia inferior del rango de análisis (por defecto 1 Hz).
+            high_freq : float, optional
+                Frecuencia superior del rango de análisis (por defecto 60 Hz).
+            channels : str or list[str], optional
+                Canal(es) a analizar. Puede ser un string con el nombre de un canal
+                o una lista con múltiples nombres (por defecto 'Cz').
+            separate_events : bool, optional
+                Si True, genera gráficos separados para cada tipo de evento (por defecto True).
+                Si False, genera un único gráfico con todos los eventos promediados.
+
+        Returns:
+            power : mne.time_frequency.AverageTFR
+                Objeto con los resultados del análisis tiempo-frecuencia.
+
+        Raises:
+            ValueError:
+                - Si no se encuentran eventos en las anotaciones.
+                - Si los canales especificados no existen en los datos.
+                - Si low_freq >= high_freq.
+
+        Notes:
+            - Utiliza wavelets de Morlet para el análisis tiempo-frecuencia.
+            - Aplica corrección de línea base usando el período pre-estímulo (-0.2 a 0 segundos).
+            - El cálculo se realiza con use_fft=True para mejor rendimiento computacional.
+            - Los resultados se muestran como cambio porcentual respecto a la línea base.
+
+        Examples:
+            >>> # Análisis para todos los eventos en el canal Cz
+            >>> power = eeg_signal.freq_time(low_freq=1, high_freq=40, channels='Cz', separate_events=False)
+            >>>
+            >>> # Análisis separado por eventos para múltiples canales
+            >>> power = eeg_signal.freq_time(low_freq=4, high_freq=30, 
+            ...                             channels=['C3', 'C4', 'Fz'], separate_events=True)
+            >>>
+            >>> # Análisis específico para banda beta en canal Pz
+            >>> power = eeg_signal.freq_time(low_freq=13, high_freq=30, channels='Pz', separate_events=True)
+        """
+        from mne.time_frequency import tfr_morlet
+
+        # Montaje estándar de MNE
+        montage = mne.channels.make_standard_montage('standard_1005')
+        mne_info = mne.create_info(ch_names=self.info.ch_names, sfreq=self.sfreq, ch_types=self.info.ch_types)
+        mne_info.set_montage(montage)
+
+        # Convierto las anotaciones propias a eventos MNE
+        events, event_id = self._from_ann_to_events()
+
+        if len(events) == 0:
+            raise ValueError("No se encontraron eventos en las anotacines. No se puede realizar el análisis tiempo-frecuencia.")
+        
+        self.events = events
+        self.event_id = event_id
+
+        # Creo objeto Raw de MNE con los datos referenciados
+        raw = mne.io.RawArray(self.data_ref, mne_info)
+        epochs = mne.Epochs(raw, events, event_id=event_id, tmin=-0.2, tmax=0.8, baseline=(-0.2, 0))
+        erp = epochs.average()
+
+        if low_freq >= high_freq:
+            raise ValueError(f"low_freq debe ser menor que high_freq: {low_freq} vs {high_freq}")
+
+        freqs = np.arange(low_freq, high_freq, 0.5)  # Frecuencias de 2 a 60 Hz
+        n_cycles = freqs / 3.0  # Número de ciclos por frecuencia
+
+        channels = _normalize_ch_list(channels, montage='standard_1005')[0] if channels else None
+
+        for ch in channels:
+            if ch not in self.info.ch_names:
+                raise ValueError(f"El canal {ch} no se existe dentro de los datos. Canales disponibles: {self.info.ch_names}")
+
+        if separate_events:
+            for event_name, event_code in event_id.items():
+                epochs_event = epochs[events[:,2] == event_code]
+                power = tfr_morlet(epochs_event, freqs=freqs, n_cycles=n_cycles, return_itc=False, average=True)
+                power.apply_baseline(baseline=(-0.2, 0), mode='percent')
+
+                power.plot(picks=channels, title=f'Tiempo-Frecuencia (TFR) - Evento: {event_name.capitalize()}', show=True, 
+                        cmap='magma')
+        else:
+            power = tfr_morlet(epochs, freqs=freqs, n_cycles=n_cycles, return_itc=False, average=True)
+
+            power.apply_baseline(baseline=(-0.2, 0), mode='percent') # percent para cambio porcentual
+
+            power.plot(picks=channels, title=f'Tiempo-Frecuencia (TFR) en {','.join(channels)}', show=True, 
+                    cmap='magma')
 
     def hilbert(self):
         pass
@@ -587,13 +681,19 @@ class EEG(RawSignal):
         """
         Visualiza waveforms ERP para canales específicos en un evento determinado.
         
-        Parameters:
-            erp: Objeto ERP de MNE
-            events: Array de eventos
-            event_id: Diccionario de mapeo de eventos
-            channels_of_interest: Lista de canales a visualizar
-            time_points: Lista de tiempos para líneas verticales
-            event_index: Índice del evento a visualizar
+        Args:
+            erp: 
+                Objeto ERP de MNE
+            events: 
+                Array de eventos
+            event_id: 
+                Diccionario de mapeo de eventos
+            channels_of_interest: 
+                Lista de canales a visualizar
+            time_points: 
+                Lista de tiempos para líneas verticales
+            event_index: 
+                Índice del evento a visualizar
         """
         # Segundo gráfico: Waveforms de canales específicos
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -624,13 +724,13 @@ class EEG(RawSignal):
             else:
                 ax.axvline(t, color='r', linestyle='--', alpha=0.7)
 
-        ax.axhline(0, color='k', linestyle='-', alpha=0.5)
-        ax.axvline(0, color='k', linestyle='-', alpha=0.6, label='Evento')
+        ax.axhline(0, color="#000000", linestyle='-', alpha=0.5)
+        ax.axvline(0, color="#000000", linestyle='-', alpha=0.9, label='Evento')
 
         ax.set_xlabel('Tiempo (s)')
         ax.set_ylabel('Amplitud (µV)')
         ax.legend()
-        ax.set_title(f'Waveforms ERP para Canales de Interés ({event_num_to_name[event_index]})')
+        ax.set_title(f'Waveforms ERP para Canales de Interés ({event_num_to_name[event_index].capitalize()})')
         
         plt.tight_layout()
         plt.show()
@@ -639,17 +739,25 @@ class EEG(RawSignal):
         """
         Genera mapas topográficos para visualización de datos EEG.
         
-        Parameters:
-            events: Array de eventos en formato MNE
-            mne_info: Información de canales compatible con MNE
-            event_id: Diccionario de mapeo de eventos
-            t_after_event: Tiempo después del evento para análisis ERP
-            t_previous_event: Tiempo antes del evento para análisis ERP  
-            event_index: Índice del evento a visualizar
-            time_points: Lista de tiempos para mapas topográficos
+        Args:
+            events: 
+                Array de eventos en formato MNE
+            mne_info: 
+                Información de canales compatible con MNE
+            event_id: 
+                Diccionario de mapeo de eventos
+            t_after_event: 
+                Tiempo después del evento para análisis ERP
+            t_previous_event: 
+                Tiempo antes del evento para análisis ERP  
+            event_index: 
+                Índice del evento a visualizar
+            time_points: 
+                Lista de tiempos para mapas topográficos
             
         Returns:
-            erp: Objeto ERP de MNE o None si no hay eventos
+            erp: 
+                Objeto ERP de MNE o None si no hay eventos
         """
         from scipy import signal
 
@@ -735,7 +843,7 @@ class EEG(RawSignal):
                 fig.delaxes(ax[j])
 
             event_num_to_name = {v: k for k, v in event_id.items()}
-            plt.suptitle(f'Mapas Topográficos de Amplitud ERP en Tiempos Específicos - ({event_num_to_name[event_index]})')
+            plt.suptitle(f'Mapas Topográficos de Amplitud ERP en Tiempos Específicos - ({event_num_to_name[event_index].capitalize()})')
             plt.tight_layout()
             plt.show()
 
