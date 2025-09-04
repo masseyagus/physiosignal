@@ -57,6 +57,8 @@ def _normalize_ch_list(ch_names, montage='standard_1005'):
     rename_map = {}
     used_targets = set()
 
+    ch_names = ch_names if isinstance(ch_names, list) else [ch_names]
+
     for ch in ch_names:
         k = _key(ch)
         if k in lookup:
@@ -173,8 +175,9 @@ class EEG(RawSignal):
             >>> eeg.channel_reference(ch='Pz', plot=True, tmin=0, tmax=15, ch_reference=['Cz', 'Pz'])
         """
         n_channels, n_samps = self.data.shape
+        ch, _ = _normalize_ch_list(ch, montage='standard_1005')
 
-        ref_data = self.data[self.info.ch_names.index(ch), :] # Canal de referencia
+        ref_data = self.data[self.info.ch_names.index(ch[0]), :] # Canal de referencia
         new_data = self.data - ref_data[None, :] # Nueva referencia para todos los canales ref[None, :] inserta una nueva dimension
 
         self.data_ref = new_data
@@ -188,12 +191,17 @@ class EEG(RawSignal):
             tmax_samps = int(n_samps/self.sfreq) if tmax > (n_samps/self.sfreq) else tmax * self.sfreq
             crop_t = np.arange(tmin_samps, tmax_samps) / self.sfreq
 
-            ch_reference = ch_reference if isinstance(ch_reference, list) else [ch_reference] # Frontal, Central, Parietal, Occipital
+            normalized, _ = _normalize_ch_list(ch_reference, montage='standard_1005')
+
+            if all(ch in self.info.ch_names for ch in normalized):
+                ch_reference = _normalize_ch_list(ch_reference, montage='standard_1005')[0]
+            else:
+                raise ValueError(f"Uno o más canales en ch_reference no existen en la señal.")
 
             fig, ax = plt.subplots(4, 1, figsize=(7, 10))
 
             for i, chs in enumerate(ch_reference):
-
+                
                 # Indice del canal
                 ch_idx = self.info.ch_names.index(chs)
 
@@ -208,6 +216,7 @@ class EEG(RawSignal):
                 # Titulos
                 ax[i].set_ylabel(f'{chs} (µV)')
                 ax[i].legend(loc='upper right')
+                ax[i].grid(True, alpha=0.5)
             
             ax[-1].set_xlabel('Tiempo (s)')
             plt.suptitle(f'Comparación antes y después de referencia a {ch}')
@@ -256,7 +265,12 @@ class EEG(RawSignal):
 
             crop_t = np.arange(tmin_samps, tmax_samps) / self.sfreq # Eje temporal acotado
 
-            ch_reference = ch_reference if isinstance(ch_reference, list) else [ch_reference] # Frontal, Central, Parietal, Occipital
+            normalized, _ = _normalize_ch_list(ch_reference, montage='standard_1005')
+
+            if all(ch in self.info.ch_names for ch in normalized):
+                ch_reference = _normalize_ch_list(ch_reference, montage='standard_1005')[0]
+            else:
+                raise ValueError(f"Uno o más canales en ch_reference no existen en la señal.")
 
             fig, ax = plt.subplots(4, 1, figsize=(7, 10))
 
@@ -276,6 +290,7 @@ class EEG(RawSignal):
                 # Titulos
                 ax[i].set_ylabel(f'{chs} (µV)')
                 ax[i].legend(loc='upper right')
+                ax[i].grid(True, alpha=0.5)
             
             ax[-1].set_xlabel('Tiempo (s)')
             plt.suptitle('Comparación temporal: Original vs Referencia al Promedio')
