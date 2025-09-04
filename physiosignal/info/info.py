@@ -228,21 +228,65 @@ class Info:
 
         return [nombre for nombre, tipo in zip(self.ch_names, self.ch_types) if tipo == ch_type.lower()]
     
+    # def _select(self, select):
+    #     """
+    #     Filtra los canales disponibles conservando solo los especificados.
+
+    #     Args:
+    #         select: Nombre(s) de canal(es) a seleccionar. Puede ser un string individual,
+    #                 una lista/tupla o un np.ndarray de strings.
+
+    #     Returns:
+    #         None: Actualiza internamente la lista de nombres de canales (self.ch_names),
+    #               manteniendo solo los especificados en el parámetro select.
+    #     """
+
     def _select(self, select):
         """
-        Filtra los canales disponibles conservando solo los especificados.
+        Filtra los canales conservando solo los especificados en `select`,
+        respetando el orden pedido en `select` y sin reordenar inesperadamente.
 
-        Args:
-            select: Nombre(s) de canal(es) a seleccionar. Puede ser un string individual,
-                    una lista/tupla o un np.ndarray de strings.
+        - select puede ser: int, str, list/tuple/np.ndarray (con nombres y/o índices).
+        - Si hay índices en 'select', se resuelven respecto al orden actual de self.ch_names.
+        - Los nombres/índices inexistentes se ignoran (se registra un warning).
+        - También actualiza self.ch_types si existe para mantener la correspondencia.
 
-        Returns:
-            None: Actualiza internamente la lista de nombres de canales (self.ch_names),
-                  manteniendo solo los especificados en el parámetro select.
+        No devuelve nada; modifica self.ch_names (y self.ch_types si aplica).
         """
-        select = select if isinstance(select, (list, tuple, np.ndarray)) else [select]
+        # Normalizar select a lista
+        if isinstance(select, (list, tuple, np.ndarray)):
+            select_list = list(select)
+        else:
+            select_list = [select]
 
-        channels = np.array(self.ch_names, dtype=str)
+        # Guardar estado original
+        orig_names = list(self.ch_names)
+        orig_types = list(self.ch_types) if hasattr(self, "ch_types") else None
 
-        self.ch_names = [str(ch) for ch in channels[np.isin(channels, select)]]
+        resolved = []
+        for item in select_list:
+            # si es índice (int o numpy integer) resuelvo a nombre (si está en rango)
+            if isinstance(item, (int, np.integer)):
+                idx = int(item)
+                if 0 <= idx < len(orig_names):
+                    name = orig_names[idx]
+            else:
+                # candidato nombre (convertir a str para comparar)
+                name = str(item)
+
+            # si el nombre existe en los originales y no lo añadí ya, lo agrego
+            if name in orig_names and name not in resolved:
+                resolved.append(name)
+
+        # Actualizar ch_names
+        self.ch_names = resolved
+
+        # Actualizar ch_types para mantener correspondencia si existían antes
+        if orig_types is not None:
+            new_types = []
+            for name in resolved:
+                orig_idx = orig_names.index(name)
+                new_types.append(orig_types[orig_idx])
+            self.ch_types = new_types
+
 
