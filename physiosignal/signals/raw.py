@@ -453,10 +453,6 @@ class RawSignal:
         if low_freq < 0 or low_freq >= high_freq:
             raise ValueError(f"low_freq debe ser mayor o igual a 1, y menor a high_freq")
 
-        # Vector de tiempo para gráficas
-        n_samps = self.data.shape[1]
-        t = np.arange(n_samps) / self.sfreq
-
         # Obtengo los coeficientes del filtro notch
         b_notch, a_notch = scipy.signal.iirnotch(notch_freq, q, self.sfreq)
 
