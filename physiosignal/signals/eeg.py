@@ -659,8 +659,102 @@ class EEG(RawSignal):
                 
             return power
 
-    def hilbert(self):
-        pass
+    def hilbert(self, channels:list[str]|str, freq_band:tuple=(1,60), plot:bool=True, tmin:float=1, tmax:float=30):
+        """
+        Aplica la transformada de Hilbert a los datos EEG para obtener la señal analítica y su envolvente.
+
+        Args:
+            channels : str or list[str]
+                Canal(es) a analizar. Los nombres se normalizarán al estándar MNE.
+            freq_band : tuple
+                Banda de frecuencia para filtrar (low_freq, high_freq), por defecto (1,60).
+            plot : bool, optional
+                Si True, genera gráficos de los resultados (por defecto True).
+            tmin : float, optional
+                Tiempo inicial en segundos para el análisis (por defecto 1).
+            tmax : float, optional
+                Tiempo final en segundos para el análisis (por defecto 30).
+
+        Returns:
+            hilbert_signal : np.array
+                Señal analítica compleja resultante de la transformada de Hilbert.
+            envelope : np.array
+                Envolvente de amplitud de la señal.
+        """
+        from scipy.signal import hilbert, butter, filtfilt
+
+        channels = _normalize_ch_list(channels, montage='standard_1005')[0]
+
+        ch_idx = [self.info.ch_names.index(ch) for ch in channels]
+
+        # Calculo índices de tiempo
+        n_samps_total = self.data_ref.shape[1]
+        tmin_samps = int(tmin * self.sfreq)
+        tmax_samps = int(tmax * self.sfreq)
+
+        # Aseguro que los índices estén dentro del rango
+        tmin_samps = max(0, tmin_samps)
+        tmax_samps = min(n_samps_total, tmax_samps)
+
+        # Extraemos datos de los canales seleccionados en el intervalo de tiempo
+        data = self.data_ref[ch_idx, tmin_samps:tmax_samps]
+
+        # Filtro en la banda de frecuencia especificada
+        if freq_band is not None:
+            nyquist = self.sfreq / 2
+            low_freq = freq_band[0] / nyquist
+            high_freq = freq_band[1] / nyquist
+
+            b_butter, a_butter = butter(4, [low_freq, high_freq], btype='band')
+            data = filtfilt(b_butter, a_butter, data, axis=1)
+
+        # Aplico transformada de Hilbert
+        hilbert_signal = hilbert(data, axis=1)
+        envelope = np.abs(hilbert_signal)
+
+        # Ploteo
+        if plot:
+            self._plot_hilbert(channels, hilbert_signal, envelope, tmin, tmax)
+
+        return hilbert_signal, envelope
+
+    def _plot_hilbert(self, channels, hilbert_signal, envelope, tmin, tmax):
+        """
+        Genera gráficos de la señal analítica y su envolvente para cada canal.
+
+        Args:
+            channels : list[str]
+                Nombres de los canales a graficar.
+            hilbert_signal : np.array
+                Señal analítica compleja.
+            envelope : np.array
+                Envolvente de amplitud.
+            tmin : float
+                Tiempo inicial del segmento.
+            tmax : float
+                Tiempo final del segmento.
+            sfreq : float
+                Frecuencia de muestreo.
+        """
+        # Creo vector de tiempo para el segmento
+        n_samps_segment = hilbert_signal.shape[1]
+        t = np.linspace(tmin, tmax, n_samps_segment)
+
+        for idx, ch in enumerate(channels):
+            plt.figure(figsize=(12, 6))
+
+            # Grafico la parte real de la señal analítica (que es la señal filtrada)
+            plt.plot(t, np.real(hilbert_signal[idx]), label='Señal filtrada')
+
+            # Grafico la envolvente
+            plt.plot(t, envelope[idx], label='Envolvente', linewidth=2)
+            plt.title(f"Transformada de Hilbert - Canal: {ch}")
+            plt.xlabel("Tiempo (s)")
+            plt.ylabel("Amplitud (µV)")
+            plt.legend()
+            plt.grid(True)
+            plt.tight_layout()
+            plt.show()
 
     def _from_ann_to_events(self):
         """
