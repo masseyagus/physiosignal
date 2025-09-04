@@ -282,7 +282,7 @@ class EEG(RawSignal):
             plt.tight_layout()
             plt.show()
 
-    def laplacian_filter(self, dic_ref:str, plot:bool=False, channels_of_interest:list|str=['Fp1', 'Cz', 'Pz', 'Oz'],
+    def laplacian_filter(self, dic_ref:str, topomap:bool=False, channels_of_interest:list|str=['Fp1', 'Cz', 'Pz', 'Oz'],
                          t_after_event:float=0.8, t_previous_event:float=-0.2, event_index:int=2, 
                          time_points:list[float]=[0.1, 0.2, 0.3, 0.4], waveform:bool=False):
         """
@@ -353,22 +353,42 @@ class EEG(RawSignal):
         self.data_ref = laplace
         self.reference = 'laplaciano'
 
-        if plot:
- 
-            # Montaje estándar de MNE
-            montage = mne.channels.make_standard_montage('standard_1005')
-            mne_info = mne.create_info(ch_names=self.info.ch_names, sfreq=self.sfreq, ch_types=self.info.ch_types)
-            mne_info.set_montage(montage)
+        # Montaje estándar de MNE
+        montage = mne.channels.make_standard_montage('standard_1005')
+        mne_info = mne.create_info(ch_names=self.info.ch_names, sfreq=self.sfreq, ch_types=self.info.ch_types)
+        mne_info.set_montage(montage)
 
-            # Convierto las anotaciones propias a eventos MNE
-            events, event_id = self._from_ann_to_events()
-            self.events = events
-            self.event_id = event_id
+        # Convierto las anotaciones propias a eventos MNE
+        events, event_id = self._from_ann_to_events()
+        self.events = events
+        self.event_id = event_id
 
-            erp = self._topomap(events, mne_info, event_id, t_after_event, t_previous_event, event_index, time_points)
+        # Si hay eventos, creo objeto Raw de MNE con los datos laplacianos
+        raw = mne.io.RawArray(self.data_ref, mne_info)
 
-            if waveform and erp is not None:
-                self._plot_waveform(erp, events, event_id, channels_of_interest, time_points, event_index)
+        # Validación de parámetros de tiempo
+        if t_after_event <= 0 or t_previous_event >= 0 or t_after_event <= abs(t_previous_event):
+            raise ValueError("Parámetros de tiempo inválidos. Asegúrese que t_after_event > 0, t_previous_event < 0 y t_after_event > |t_previous_event|")
+        
+        tmin = t_previous_event
+        tmax = t_after_event
+        baseline = (t_previous_event, 0)  # Período de línea base
+
+        # Extraigo los epochs alrededor de los eventos
+        epochs = mne.Epochs(raw, events, event_id=event_id, tmin=tmin, tmax=tmax, 
+                            baseline=baseline, preload=True, verbose=False)
+        
+        # Filtro por epocas del evento seleccionado
+        epochs=epochs[events[:,2] == event_index]
+        
+        # Hallo el promedio (ERP) de los epochs
+        erp = epochs.average()
+
+        if topomap:
+            self._topomap(erp, events, mne_info, event_id, event_index, time_points)
+
+        if waveform and erp is not None:
+            self._plot_waveform(erp, events, event_id, channels_of_interest, time_points, event_index)
 
     def fft(self, pick_channel:list[str]|str='Cz', band:list[str]|str='Alpha', plot:bool=True, low_freq:float=None, high_freq:float=None):
         """
@@ -600,7 +620,7 @@ class EEG(RawSignal):
         plt.tight_layout()
         plt.show()
 
-    def _topomap(self, events, mne_info, event_id, t_after_event, t_previous_event, event_index, time_points):
+    def _topomap(self, erp, events, mne_info, event_id, event_index, time_points):
         """
         Genera mapas topográficos para visualización de datos EEG.
         
@@ -663,27 +683,6 @@ class EEG(RawSignal):
             return None
         
         else:
-            # Si hay eventos, creo objeto Raw de MNE con los datos laplacianos
-            raw = mne.io.RawArray(self.data_ref, mne_info)
-
-            # Validación de parámetros de tiempo
-            if t_after_event <= 0 or t_previous_event >= 0 or t_after_event <= abs(t_previous_event):
-                raise ValueError("Parámetros de tiempo inválidos. Asegúrese que t_after_event > 0, t_previous_event < 0 y t_after_event > |t_previous_event|")
-            
-            tmin = t_previous_event
-            tmax = t_after_event
-            baseline = (t_previous_event, 0)  # Período de línea base
-
-            # Extraigo los epochs alrededor de los eventos
-            epochs = mne.Epochs(raw, events, event_id=event_id, tmin=tmin, tmax=tmax, 
-                                baseline=baseline, preload=True, verbose=False)
-            
-            # Filtro por epocas del evento seleccionado
-            epochs=epochs[events[:,2] == event_index]
-            
-            # Hallo el promedio (ERP) de los epochs
-            erp = epochs.average()
-
             # Tiempos de interés para los mapas topográficos
             time_points = time_points if isinstance(time_points, list) else [time_points]
 
