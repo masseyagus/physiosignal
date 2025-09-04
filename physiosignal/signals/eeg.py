@@ -82,28 +82,75 @@ def _normalize_ch_list(ch_names, montage='standard_1005'):
 
 class EEG(RawSignal):
     """
-    Representa una señal de Electroencefalografía (EEG) con herramientas específicas de análisis.
+    Representa una señal de Electroencefalografía (EEG) con utilidades comunes para
+    preprocesado, referencia, análisis espectral y visualización.
 
     Key Features:
-        - Cambio de referencia (promedio, canal, laplaciano, etc.)
-        - Filtro Laplaciano
-        - Cálculo y visualización de espectro de Fourier
-        - Generación de gráficas tiempo-frecuencia (espectrogramas)
-        - Transformada de Hilbert (envolvente y fase)
+        - Cambio de referencia (por canal, promedio, laplaciano).
+        - Filtro laplaciano espacial a partir de una configuración de vecinos.
+        - Cálculo y visualización de espectro (FFT) usando Welch.
+        - Análisis tiempo-frecuencia (wavelets de Morlet) y aplicación de baseline.
+        - Transformada de Hilbert para obtener señal analítica y envolvente.
+        - Conversión de anotaciones internas a eventos compatibles con MNE.
+        - Funciones de visualización: waveforms, topomaps y gráficas tiempo-frecuencia.
 
     Attributes:
         data : np.ndarray
-            Señal EEG cruda de forma (n_canales, n_muestras).
+            Señal EEG cruda con forma (n_canales, n_muestras).
         sfreq : float
             Frecuencia de muestreo en Hz.
         info : Info
-            Metadatos de canales (nombres, tipos, etc.).
+            Metadatos de canales. Los nombres se normalizan al montaje MNE 
+            por defecto ('standard_1005') durante la inicialización.
         anotaciones : Annotations
-            Anotaciones de eventos temporales.
+            Anotaciones de eventos temporales (onset, duration, description).
         first_samp : int
             Índice de la primera muestra respecto al inicio original.
+        data_ref : np.ndarray, opcional
+            Señal referenciada (resultado de aplicar channel_reference, mean_reference o laplacian_filter).
+            Varios métodos (por ejemplo `fft`, `freq_time`, `hilbert`) esperan que `data_ref` exista.
         reference : str
-            Referencia actual aplicada ('promedio', 'canal', 'laplaciano', etc.).
+            Tipo de referencia actualmente aplicada ('promedio', 'canal', 'laplaciano', etc.).
+        events : np.ndarray, opcional
+            Matriz de eventos en formato MNE ([muestra, 0, código]) si se derivaron de las anotaciones.
+            Este array se genera por el método interno `_from_ann_to_events()` y se asigna a `self.events`
+            en métodos como `laplacian_filter()` y `freq_time()` cuando se crean epochs desde las anotaciones.
+        event_id : dict, opcional
+            Diccionario de mapeo {descripcion: codigo} generado desde las anotaciones.
+            Se construye en `_from_ann_to_events()` y es usado/almacenado por `laplacian_filter()` y `freq_time()`.
+        fft_psd : np.ndarray, opcional
+            Resultado de PSD (dB) tras ejecutar `fft()`. Se crea y guarda en `self.fft_psd` por el método `fft`.
+        fft_freq : np.ndarray, opcional
+            Vector de frecuencias asociado a `fft_psd`. Se crea y guarda en `self.fft_freq` por el método `fft`.
+
+    Notes:
+        - Muchas funciones de visualización usan matplotlib; las llamadas a `plot` muestran
+          figuras en pantalla (plt.show()).
+        - La normalización de nombres de canales utiliza comparaciones insensibles a
+          mayúsculas/minúsculas y elimina caracteres como '-', '.' y espacios.
+        - Antes de ejecutar métodos que requieren referencia (por ejemplo `fft`, `freq_time`,
+          `hilbert`) se debe haber calculado y guardado `data_ref` mediante `channel_reference`,
+          `mean_reference` o `laplacian_filter`; de lo contrario se lanzará un ValueError.
+        - Los métodos que emplean eventos dependen de las anotaciones provistas; si no hay
+          anotaciones válidas, se lanzarán errores o se devolverán resultados parciales.
+        - Para compatibilidad con MNE se utiliza por defecto el montaje 'standard_1005'.
+        - Para reducir salida de log informativa de MNE, ejecutar antes:
+        
+            mne.set_log_level('ERROR')
+
+    Examples:
+        >>> # Instanciación básica
+        >>> eeg = EEG(data=my_data, sfreq=250.0, info=my_info, anotaciones=my_annots)
+        >>>
+        >>> # Referencia al promedio y cálculo de FFT
+        >>> eeg.mean_reference(plot=False)
+        >>> eeg.fft(pick_channel='Cz', band='Alpha', plot=True)
+        >>>
+        >>> # Análisis tiempo-frecuencia por evento
+        >>> power = eeg.freq_time(low_freq=1, high_freq=40, channels=['C3','C4'], separate_events=False)
+        >>>
+        >>> # Hilbert sobre un segmento
+        >>> analytic, env = eeg.hilbert(channels='Cz', freq_band=(8,12), plot=True)
     """
     
     def __init__(self, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
