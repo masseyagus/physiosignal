@@ -228,19 +228,6 @@ class Info:
 
         return [nombre for nombre, tipo in zip(self.ch_names, self.ch_types) if tipo == ch_type.lower()]
     
-    # def _select(self, select):
-    #     """
-    #     Filtra los canales disponibles conservando solo los especificados.
-
-    #     Args:
-    #         select: Nombre(s) de canal(es) a seleccionar. Puede ser un string individual,
-    #                 una lista/tupla o un np.ndarray de strings.
-
-    #     Returns:
-    #         None: Actualiza internamente la lista de nombres de canales (self.ch_names),
-    #               manteniendo solo los especificados en el parámetro select.
-    #     """
-
     def _select(self, select) -> None:
         """
         Filtra los canales conservando solo los especificados en `select`,
