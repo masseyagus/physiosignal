@@ -500,7 +500,7 @@ class RawSignal:
 
         # Actualizo los canales 
         new_info = deepcopy(self.info)
-        new_info._select(picks)
+        new_info._select(select=picks)
 
         return RawSignal(data=channels, sfreq=self.sfreq, info=new_info, anotaciones=self.anotaciones, first_samp=self.first_samp)
 
@@ -547,7 +547,7 @@ class RawSignal:
             - Ventana adaptable al número de canales.
 
         Args:
-            picks : int, str, list o tuple, optional
+            picks : str, list[str] optional
                 Canales a visualizar.
             start : float, optional
                 Tiempo inicial en s.
@@ -686,7 +686,7 @@ class RawSignal:
 
         # 6. Crear gráfico para cada canal con escalado inteligente
         # Itero sobre cada canal
-        for idx in range(n_chan):
+        for idx, ch_name in enumerate(self.info.ch_names):
             # Obtengo el tipo de canal (si está disponible)
             ch_type = self.info.ch_types[idx].lower() if idx < len(self.info.ch_types) else 'unknown'
             
@@ -706,8 +706,10 @@ class RawSignal:
             plot_item = channel_widget.plot(times, data[idx, :], 
                             pen=pg.mkPen("#1f77b4", width=1.5)) # Pen especifica el trazado de la línea
             
+            # channel = picks if isinstance(picks, list) else [picks]
+            
             # Configuración de ejes
-            channel_widget.setLabel('left', self.info.ch_names[idx], 
+            channel_widget.setLabel('left', ch_name, 
                                 **{'color': 'k', 'font-size': '12pt',
                                    'font-family':'Times New Roman'}) # Configuro el nombre del eje de ese canal y su formato
             
@@ -766,7 +768,6 @@ class RawSignal:
             container_layout.addWidget(legend_container) # Añado todo al layout principal (el que contiene los canales)
             hbox.setAlignment(Qt.AlignLeft)
         
-
         # 8. Configuración final del scroll
         scroll.setWidget(container)
         main_win.setCentralWidget(scroll)
