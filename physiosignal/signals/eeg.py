@@ -85,6 +85,14 @@ class EEG(RawSignal):
     Representa una señal de Electroencefalografía (EEG) con utilidades comunes para
     preprocesado, referencia, análisis espectral y visualización.
 
+    Al inicializar, normaliza los nombres de canales al estándar MNE ('standard_1005'),
+    convierte anotaciones a eventos compatibles con MNE y configura el logger interno.
+    Si se pasa un objeto `RawSignal` mediante el parámetro `raw`, la inicialización
+    ejecuta la lógica base de `RawSignal.__init__` sobre copias profundas de sus
+    atributos para garantizar que la ruta de inicialización sea idéntica a la de
+    pasar los atributos individualmente y para evitar mutaciones sobre el objeto
+    `raw` original.
+
     Key Features:
         - Cambio de referencia (por canal, promedio, laplaciano).
         - Filtro laplaciano espacial a partir de una configuración de vecinos.
@@ -100,24 +108,25 @@ class EEG(RawSignal):
         sfreq : float
             Frecuencia de muestreo en Hz.
         info : Info
-            Metadatos de canales. Los nombres se normalizan al montaje MNE 
-            por defecto ('standard_1005') durante la inicialización.
+            Metadatos de canales. Los nombres se normalizan al montaje MNE
+            por defecto ('standard_1005') durante la inicialización (sobre una copia
+            para no mutar objetos externos).
         anotaciones : Annotations
             Anotaciones de eventos temporales (onset, duration, description).
         first_samp : int
-            Índice de la primera muestra respecto al inicio original.
+            Índice de la primera muestra respecto al inicio original. Se conserva el
+            valor provisto por `raw` si la instancia se crea con `raw=...`.
         data_ref : np.ndarray, opcional
             Señal referenciada (resultado de aplicar channel_reference, mean_reference o laplacian_filter).
             Varios métodos (por ejemplo `fft`, `freq_time`, `hilbert`) esperan que `data_ref` exista.
         reference : str
             Tipo de referencia actualmente aplicada ('promedio', 'canal', 'laplaciano', etc.).
         events : np.ndarray, opcional
-            Matriz de eventos en formato MNE ([muestra, 0, código]) si se derivaron de las anotaciones.
-            Este array se genera por el método interno `_from_ann_to_events()` y se asigna a `self.events`
-            en métodos como `laplacian_filter()` y `freq_time()` cuando se crean epochs desde las anotaciones.
+            Matriz de eventos en formato MNE ([muestra, 0, código]) generada por `_from_ann_to_events()`.
+            Se crea y almacena durante la inicialización (después de normalizar nombres de canales)
+            para que su semántica sea consistente independientemente de cómo se instancia el objeto.
         event_id : dict, opcional
-            Diccionario de mapeo {descripcion: codigo} generado desde las anotaciones.
-            Se construye en `_from_ann_to_events()` y es usado/almacenado por `laplacian_filter()` y `freq_time()`.
+            Diccionario de mapeo {descripcion: codigo} generado desde las anotaciones por `_from_ann_to_events()`.
         fft_psd : np.ndarray, opcional
             Resultado de PSD (dB) tras ejecutar `fft()`. Se crea y guarda en `self.fft_psd` por el método `fft`.
         fft_freq : np.ndarray, opcional
@@ -127,7 +136,11 @@ class EEG(RawSignal):
         - Muchas funciones de visualización usan matplotlib; las llamadas a `plot` muestran
           figuras en pantalla (plt.show()).
         - La normalización de nombres de canales utiliza comparaciones insensibles a
-          mayúsculas/minúsculas y elimina caracteres como '-', '.' y espacios.
+          mayúsculas/minúsculas y elimina caracteres como '-', '.' y espacios; se aplica
+          sobre una copia del `info` para evitar modificar el `raw` original.
+        - Si se inicializa con `raw=...`, la clase llamará a `super().__init__` con copias
+          profundas de `raw.data`, `raw.sfreq`, `raw.info`, `raw.anotaciones` y `raw.first_samp`
+          para garantizar que la lógica de `RawSignal.__init__` se ejecute siempre.
         - Antes de ejecutar métodos que requieren referencia (por ejemplo `fft`, `freq_time`,
           `hilbert`) se debe haber calculado y guardado `data_ref` mediante `channel_reference`,
           `mean_reference` o `laplacian_filter`; de lo contrario se lanzará un ValueError.
@@ -139,8 +152,11 @@ class EEG(RawSignal):
             mne.set_log_level('ERROR')
 
     Examples:
-        >>> # Instanciación básica
-        >>> eeg = EEG(data=my_data, sfreq=250.0, info=my_info, anotaciones=my_annots)
+        >>> # Instanciación desde atributos (asegurarse de pasar first_samp si es relevante)
+        >>> eeg = EEG(data=my_data, sfreq=250.0, info=my_info, anotaciones=my_annots, first_samp=my_first_samp)
+        >>>
+        >>> # Instanciación desde un objeto RawSignal (equivalente a pasar atributos)
+        >>> eeg = EEG(raw=my_rawsignal)
         >>>
         >>> # Referencia al promedio y cálculo de FFT
         >>> eeg.mean_reference(plot=False)
@@ -153,28 +169,66 @@ class EEG(RawSignal):
         >>> analytic, env = eeg.hilbert(channels='Cz', freq_band=(8,12), plot=True)
     """
     
-    def __init__(self, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
+    def __init__(self, raw:RawSignal=None, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
                  first_samp:int=0, see_log:bool=True, reference:str='promedio'):
         """
         Inicializa una instancia de EEGSignal.
 
+        Comportamiento:
+            - Si se pasa `raw` (objeto RawSignal), la inicialización ejecuta siempre la
+              lógica base de `RawSignal.__init__` llamando a `super().__init__` con copias
+              profundas (`deepcopy`) de los atributos de `raw` (data, sfreq, info,
+              anotaciones y first_samp). Esto preserva `first_samp` y evita mutar el objeto
+              `raw` original.
+            - Si `raw` es None, se inicializa mediante `super().__init__` usando los
+              parámetros `data`, `sfreq`, `info`, `anotaciones` y `first_samp` como antes.
+            - Después de la inicialización base se normalizan los nombres de canales sobre
+              la copia de `info` y se regeneran `events` y `event_id` mediante
+              `_from_ann_to_events()` para garantizar consistencia entre ambas rutas
+              de creación del objeto.
+
         Parameters:
+            raw : RawSignal, optional
+                Objeto RawSignal desde el cual inicializar la instancia. Si se proporciona,
+                tiene prioridad frente a `data`, `sfreq`, `info` y `anotaciones`.
             data : np.ndarray, optional
-                Matriz (n_canales, n_muestras) con la señal EEG cruda.
+                Matriz (n_canales, n_muestras) con la señal EEG cruda (usado si raw is None).
             sfreq : float, optional
-                Frecuencia de muestreo en Hz. Si None, se usa info.sfreq.
+                Frecuencia de muestreo en Hz. Si None y raw es None, se intenta usar info.sfreq.
             info : Info, optional
-                Metadatos de canales.
+                Metadatos de canales (usado si raw is None).
             anotaciones : Annotations, optional
-                Eventos temporales asociados.
+                Eventos temporales asociados (usado si raw is None).
             first_samp : int, optional
-                Índice de la primera muestra respecto al registro original.
+                Índice de la primera muestra respecto del registro original (usado si raw is None).
+                Si se pasa `raw`, el `first_samp` empleado será `raw.first_samp`.
             see_log : bool, optional
                 Activa/desactiva logging interno.
             reference : str, optional
                 Tipo de referencia inicial ('promedio', 'canal', 'laplaciano', etc.).
+
+        Notes:
+            - El uso de `deepcopy` al inicializar desde `raw` garantiza que las modificaciones
+              internas (por ejemplo renombrado de canales) no afecten al objeto `raw` que se
+              pasó como entrada. Esto tiene un coste de memoria; si se desea evitar la copia
+              profunda, ajustar la implementación con precaución.
+            - La normalización de nombres de canales y la generación de `events` se realizan
+              inmediatamente en la inicialización para que `events`, `event_id`, `info`
+              y `first_samp` sean consistentes y reproducibles tanto si la instancia se
+              creó desde `raw` como desde atributos individuales.
         """
-        super().__init__(data, sfreq, info, anotaciones, first_samp, see_log)
+        from copy import deepcopy
+        if raw is not None:
+            # Inicializamos siempre llamando a super().__init__ para mantener la lógica de RawSignal
+            super().__init__(deepcopy(raw.data),
+                            deepcopy(raw.sfreq),
+                            deepcopy(raw.info),
+                            deepcopy(raw.anotaciones),
+                            deepcopy(raw.first_samp),
+                            see_log)
+        else:
+            super().__init__(data, sfreq, info, anotaciones, first_samp, see_log)
+
         self.reference = reference
 
         # Configuración inicial del logger
@@ -185,6 +239,9 @@ class EEG(RawSignal):
         n_original = len(self.info.ch_names)
         normalized, rename_map = _normalize_ch_list(self.info.ch_names, montage='standard_1005')
         self.info.ch_names = normalized
+
+        # Convierto las anotaciones propias a eventos MNE
+        self.events, self.event_id = self._from_ann_to_events()
 
         if rename_map:
             logging.info(f"Se aplicaron renombrados (original -> canónico):")
@@ -420,11 +477,6 @@ class EEG(RawSignal):
         mne_info = mne.create_info(ch_names=self.info.ch_names, sfreq=self.sfreq, ch_types=self.info.ch_types)
         mne_info.set_montage(montage)
 
-        # Convierto las anotaciones propias a eventos MNE
-        events, event_id = self._from_ann_to_events()
-        self.events = events
-        self.event_id = event_id
-
         # Si hay eventos, creo objeto Raw de MNE con los datos laplacianos
         raw = mne.io.RawArray(self.data_ref, mne_info)
 
@@ -437,20 +489,20 @@ class EEG(RawSignal):
         baseline = (t_previous_event, 0)  # Período de línea base
 
         # Extraigo los epochs alrededor de los eventos
-        epochs = mne.Epochs(raw, events, event_id=event_id, tmin=tmin, tmax=tmax, 
+        epochs = mne.Epochs(raw, self.events, event_id=self.event_id, tmin=tmin, tmax=tmax, 
                             baseline=baseline, preload=True, verbose=False)
         
         # Filtro por epocas del evento seleccionado
-        epochs=epochs[events[:,2] == event_index]
+        epochs=epochs[self.events[:,2] == event_index]
         
         # Hallo el promedio (ERP) de los epochs
         erp = epochs.average()
 
         if topomap:
-            self._topomap(erp, events, mne_info, event_id, event_index, time_points)
+            self._topomap(erp, self.events, mne_info, self.event_id, event_index, time_points)
 
         if waveform and erp is not None:
-            self._plot_waveform(erp, events, event_id, channels_of_interest, time_points, event_index)
+            self._plot_waveform(erp, self.events, self.event_id, channels_of_interest, time_points, event_index)
 
     def fft(self, pick_channel:list[str]|str='Cz', band:list[str]|str='Alpha', plot:bool=True, low_freq:float=None, high_freq:float=None):
         """
@@ -655,18 +707,12 @@ class EEG(RawSignal):
         mne_info = mne.create_info(ch_names=self.info.ch_names, sfreq=self.sfreq, ch_types=self.info.ch_types)
         mne_info.set_montage(montage)
 
-        # Convierto las anotaciones propias a eventos MNE
-        events, event_id = self._from_ann_to_events()
-
-        if len(events) == 0:
+        if len(self.events) == 0:
             raise ValueError("No se encontraron eventos en las anotacines. No se puede realizar el análisis tiempo-frecuencia.")
-        
-        self.events = events
-        self.event_id = event_id
 
         # Creo objeto Raw de MNE con los datos referenciados
         raw = mne.io.RawArray(self.data_ref, mne_info)
-        epochs = mne.Epochs(raw, events, event_id=event_id, tmin=-0.2, tmax=0.8, baseline=(-0.2, 0))
+        epochs = mne.Epochs(raw, self.events, event_id=self.event_id, tmin=-0.2, tmax=0.8, baseline=(-0.2, 0))
         erp = epochs.average()
 
         if low_freq >= high_freq:
@@ -683,8 +729,8 @@ class EEG(RawSignal):
 
         if separate_events:
             power_dict = {}
-            for event_name, event_code in event_id.items():
-                epochs_event = epochs[events[:,2] == event_code]
+            for event_name, event_code in self.event_id.items():
+                epochs_event = epochs[self.events[:,2] == event_code]
                 power = tfr_morlet(epochs_event, freqs=freqs, n_cycles=n_cycles, return_itc=False, average=True, use_fft=True)
                 power.apply_baseline(baseline=(-0.2, 0), mode='percent')
 
