@@ -122,11 +122,11 @@ class EEG(RawSignal):
         reference : str
             Tipo de referencia actualmente aplicada ('promedio', 'canal', 'laplaciano', etc.).
         events : np.ndarray, opcional
-            Matriz de eventos en formato MNE ([muestra, 0, código]) generada por `_from_ann_to_events()`.
-            Se crea y almacena durante la inicialización (después de normalizar nombres de canales)
-            para que su semántica sea consistente independientemente de cómo se instancia el objeto.
+            Matriz de eventos en formato MNE ([muestra, 0, código]) generada por la inicialización.
+            Se crea automáticamente a partir de `anotaciones` y `first_samp` para garantizar
+            consistencia en todas las rutas de creación del objeto.
         event_id : dict, opcional
-            Diccionario de mapeo {descripcion: codigo} generado desde las anotaciones por `_from_ann_to_events()`.
+            Diccionario de mapeo {descripcion: codigo} generado desde las anotaciones.
         fft_psd : np.ndarray, opcional
             Resultado de PSD (dB) tras ejecutar `fft()`. Se crea y guarda en `self.fft_psd` por el método `fft`.
         fft_freq : np.ndarray, opcional
@@ -134,18 +134,19 @@ class EEG(RawSignal):
 
     Notes:
         - Muchas funciones de visualización usan matplotlib; las llamadas a `plot` muestran
-          figuras en pantalla (plt.show()).
+        figuras en pantalla (plt.show()).
         - La normalización de nombres de canales utiliza comparaciones insensibles a
-          mayúsculas/minúsculas y elimina caracteres como '-', '.' y espacios; se aplica
-          sobre una copia del `info` para evitar modificar el `raw` original.
+        mayúsculas/minúsculas y elimina caracteres como '-', '.' y espacios; se aplica
+        sobre una copia del `info` para evitar modificar el `raw` original.
         - Si se inicializa con `raw=...`, la clase llamará a `super().__init__` con copias
-          profundas de `raw.data`, `raw.sfreq`, `raw.info`, `raw.anotaciones` y `raw.first_samp`
-          para garantizar que la lógica de `RawSignal.__init__` se ejecute siempre.
+        profundas de `raw.data`, `raw.sfreq`, `raw.info`, `raw.anotaciones` y `raw.first_samp`
+        para garantizar que la lógica de `RawSignal.__init__` se ejecute siempre.
         - Antes de ejecutar métodos que requieren referencia (por ejemplo `fft`, `freq_time`,
-          `hilbert`) se debe haber calculado y guardado `data_ref` mediante `channel_reference`,
-          `mean_reference` o `laplacian_filter`; de lo contrario se lanzará un ValueError.
-        - Los métodos que emplean eventos dependen de las anotaciones provistas; si no hay
-          anotaciones válidas, se lanzarán errores o se devolverán resultados parciales.
+        `hilbert`) se debe haber calculado y guardado `data_ref` mediante `channel_reference`,
+        `mean_reference` o `laplacian_filter`; de lo contrario se lanzará un ValueError.
+        - Los métodos que emplean eventos dependen de las anotaciones provistas; si se modifican
+        las anotaciones tras la inicialización, llamá a `refresh_events()` para regenerar
+        `self.events` y `self.event_id`.
         - Para compatibilidad con MNE se utiliza por defecto el montaje 'standard_1005'.
         - Para reducir salida de log informativa de MNE, ejecutar antes:
         
@@ -176,16 +177,15 @@ class EEG(RawSignal):
 
         Comportamiento:
             - Si se pasa `raw` (objeto RawSignal), la inicialización ejecuta siempre la
-              lógica base de `RawSignal.__init__` llamando a `super().__init__` con copias
-              profundas (`deepcopy`) de los atributos de `raw` (data, sfreq, info,
-              anotaciones y first_samp). Esto preserva `first_samp` y evita mutar el objeto
-              `raw` original.
+            lógica base de `RawSignal.__init__` llamando a `super().__init__` con copias
+            profundas (`deepcopy`) de los atributos de `raw` (data, sfreq, info,
+            anotaciones y first_samp). Esto preserva `first_samp` y evita mutar el objeto
+            `raw` original.
             - Si `raw` es None, se inicializa mediante `super().__init__` usando los
-              parámetros `data`, `sfreq`, `info`, `anotaciones` y `first_samp` como antes.
+            parámetros `data`, `sfreq`, `info`, `anotaciones` y `first_samp` como antes.
             - Después de la inicialización base se normalizan los nombres de canales sobre
-              la copia de `info` y se regeneran `events` y `event_id` mediante
-              `_from_ann_to_events()` para garantizar consistencia entre ambas rutas
-              de creación del objeto.
+            la copia de `info` y se generan `events` y `event_id` internamente para
+            garantizar consistencia entre ambas rutas de creación del objeto.
 
         Parameters:
             raw : RawSignal, optional
@@ -209,13 +209,15 @@ class EEG(RawSignal):
 
         Notes:
             - El uso de `deepcopy` al inicializar desde `raw` garantiza que las modificaciones
-              internas (por ejemplo renombrado de canales) no afecten al objeto `raw` que se
-              pasó como entrada. Esto tiene un coste de memoria; si se desea evitar la copia
-              profunda, ajustar la implementación con precaución.
+            internas (por ejemplo renombrado de canales) no afecten al objeto `raw` que se
+            pasó como entrada. Esto tiene un coste de memoria; si se desea evitar la copia
+            profunda, ajustar la implementación con precaución.
             - La normalización de nombres de canales y la generación de `events` se realizan
-              inmediatamente en la inicialización para que `events`, `event_id`, `info`
-              y `first_samp` sean consistentes y reproducibles tanto si la instancia se
-              creó desde `raw` como desde atributos individuales.
+            inmediatamente en la inicialización para que `events`, `event_id`, `info`
+            y `first_samp` sean consistentes y reproducibles tanto si la instancia se
+            creó desde `raw` como desde atributos individuales.
+            - Si modificás `self.anotaciones` tras la inicialización, llamá a `refresh_events()`
+            para regenerar `self.events` y `self.event_id` (no usar `_from_ann_to_events()` desde fuera).
         """
         from copy import deepcopy
         if raw is not None:
@@ -432,11 +434,15 @@ class EEG(RawSignal):
             ValueError: Si el archivo JSON no existe o parámetros son inválidos.
 
         Notes:
-            - Aplica filtro laplaciano usando configuración de vecinos del JSON
-            - Si plot=True: muestra mapas topográficos de potencia por bandas (sin eventos)
-            o mapas ERP en tiempos específicos (con eventos)
-            - Si waveform=True y hay eventos: muestra waveforms de canales seleccionados
-            - Los resultados se guardan en data_ref y reference
+            - Aplica filtro laplaciano usando configuración de vecinos del JSON.
+            - El método **usa** `self.events` y `self.event_id` generados en la inicialización.
+            Por tanto, `events` reflejarán el `first_samp` empleado al crear la instancia.
+            - Si `self.events` está vacío, el método muestra mapas topográficos de potencia
+            RMS sobre los datos continuos.
+            - Si `waveform=True` y hay eventos: muestra waveforms de canales seleccionados.
+            - Los resultados se guardan en `data_ref` y se actualiza `reference`.
+            - Si modificás las anotaciones tras la inicialización, llamá a `refresh_events()`
+            para regenerar `self.events` antes de ejecutar este método.
 
         Examples:
             >>> # Filtro sin visualización
@@ -685,6 +691,11 @@ class EEG(RawSignal):
             - Aplica corrección de línea base usando el período pre-estímulo (-0.2 a 0 segundos).
             - El cálculo se realiza con use_fft=True para mejor rendimiento computacional.
             - Los resultados se muestran como cambio porcentual respecto a la línea base.
+            - Importante: este método **utiliza** `self.events` y `self.event_id` generados
+            en la inicialización (mediante `_from_ann_to_events()`). Asegurate de que las
+            anotaciones ya se hayan convertido a eventos antes de llamar a `freq_time`.
+            Si modificaste `self.anotaciones` tras crear la instancia, llamá a `refresh_events()`
+            para regenerar los eventos.
             - Evita mensajes de log ejecutando `mne.set_log_level('ERROR')` antes.
 
         Examples:
@@ -811,6 +822,24 @@ class EEG(RawSignal):
 
         return hilbert_signal, envelope
 
+    def refresh_events(self):
+        """
+        Regenera y actualiza `self.events` y `self.event_id` a partir de `self.anotaciones`.
+
+        Uso recomendado cuando se han modificado `self.anotaciones` después de la inicialización.
+        Esta función es la interfaz pública para actualizar los eventos y evita que el usuario
+        tenga que invocar el método privado `_from_ann_to_events()`.
+
+        Returns:
+            tuple: (events, event_id)
+                events: np.ndarray
+                    Array de eventos actualizado en formato MNE ([muestra_relativa, 0, código]).
+                event_id: dict
+                    Diccionario de mapeo actualizado {descripción: código}.
+        """
+        self.events, self.event_id = self._from_ann_to_events()
+        return self.events, self.event_id
+
     def _plot_hilbert(self, channels, hilbert_signal, envelope, tmin, tmax):
         """
         Genera gráficos de la señal analítica y su envolvente para cada canal.
@@ -852,14 +881,29 @@ class EEG(RawSignal):
     def _from_ann_to_events(self):
         """
         Convierte anotaciones a eventos en formato MNE.
-        
+
+        (Método privado — uso interno.)
+
         Asume que las anotaciones están en tiempo absoluto respecto al inicio
-        original del registro. Ajusta automáticamente restando first_samp.
+        original del registro. Ajusta automáticamente restando `first_samp`
+        para devolver índices de muestra relativos al objeto actual.
 
         Returns:
             tuple: (events, event_id)
-                events: array de eventos en formato MNE [muestra, 0, código]
-                event_id: diccionario de mapeo {descripción: código}
+                events: np.ndarray
+                    Array de eventos en formato MNE con filas [muestra_relativa, 0, código].
+                    Las muestras son calculadas como int(onset * sfreq) - first_samp.
+                event_id: dict
+                    Diccionario de mapeo {descripción: código} generado a partir de las
+                    descripciones de las anotaciones.
+
+        Notes:
+            - Este método se invoca internamente durante la inicialización para generar
+            `self.events` y `self.event_id`. No está pensado para ser llamado
+            directamente por usuarios; usá `refresh_events()` si necesitas regenerar
+            los eventos tras modificar `self.anotaciones`.
+            - Los eventos devueltos ya están ajustados por `first_samp`; no deben restarse
+            de nuevo al pasarlos a funciones de MNE.
         """
         events, event_id = [], {}
         current_id = 1
