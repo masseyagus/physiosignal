@@ -352,8 +352,180 @@ class ECG(RawSignal):
         plt.tight_layout()
         plt.show()  
 
-    def heart_rate(self):
-        pass
+    def find_heart_rate(self):
+        """
+        Calcula la frecuencia cardíaca promedio (BPM) basada en los picos R detectados.
+
+        Returns:
+            float: Frecuencia cardíaca en beats por minuto (BPM).
+
+        Raises:
+            ValueError:
+                Si no se han detectado picos R previamente (`self.r_peaks` es None).
+
+        Side effects / Atributos generados:
+            - self.heart_rate : float
+                La frecuencia cardíaca calculada en BPM.
+
+        Notes:
+            - Este método depende de que `peak_detection()` haya sido ejecutado.
+            - Internamente llama a `_compute_heart_rate()` para obtener el valor.
+        """
+        if self.r_peaks is None:
+            raise ValueError("Primero debe detectar los picos R usando peak_detection()")
+
+        return self._compute_heart_rate()
+
+    def plot_heart_rate(self, before:float=0.2, after:float=0.5):
+        """
+        Grafica latidos individuales extraídos alrededor de cada pico R detectado,
+        junto con la forma de latido promedio y la frecuencia cardíaca promedio.
+
+        Args:
+            before : float, optional
+                Tiempo en segundos a incluir antes del pico R. Por defecto 0.2 s.
+            after : float, optional
+                Tiempo en segundos a incluir después del pico R. Por defecto 0.5 s.
+
+        Raises:
+            ValueError:
+                Si no se han detectado picos R previamente (`self.r_peaks` es None).
+
+        Side effects / Atributos generados:
+            - self.heart_rate : float
+                Se asegura de estar calculada antes de graficar.
+
+        Notes:
+            - Se generan segmentos de ECG centrados en cada pico R mediante `_extract_segment`.
+            - Cada segmento se grafica con transparencia y se superpone la curva promedio.
+            - La frecuencia cardíaca promedio se muestra en el título del gráfico.
+        """
+        if self.r_peaks is None:
+            raise ValueError("Primero debe detectar los picos R usando peak_detection()")
+        
+        segments, time_vector = self._extract_segment(before=before, after=after)
+        segments_array = np.array(segments)
+        
+        # Hallo el latido promedio
+        avg_beat = np.nanmean(segments_array, axis=0)
+
+        # Aseguramps que avg_beat tenga la misma longitud que time_vector
+        if len(avg_beat) != len(time_vector):
+            # Si hay discrepancia, truncar o interpolar para que coincidan
+            min_length = min(len(avg_beat), len(time_vector))
+            avg_beat = avg_beat[:min_length]
+            time_vector = time_vector[:min_length]
+        
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        for segment in segments:
+            if len(segment) != len(time_vector):
+                # Grafico cada segmento o latido
+                ax.plot(time_vector, segment, color="#9B9797", alpha=0.5, zorder=1, linewidth=0.5)
+            else:
+                ax.plot(time_vector, segment, color='#9B9797', alpha=0.5, zorder=1, linewidth=0.5)
+
+        # Grafico el latido promedio
+        ax.plot(time_vector, avg_beat, color="#8000FF", linewidth=2, zorder=3, label='Forma de ritmo promedio')
+        ax.axhline(0, color="#000000", linestyle='--', alpha=0.5)
+        ax.axvline(0, color="#000000", linestyle='--', alpha=0.5)
+        
+        # Configurar la gráfica
+        ax.set_xlabel('Time (seconds)')
+        ax.set_ylabel('Amplitude (µV)')
+
+            # Asegurarse de que heart_rate esté calculado
+        if not hasattr(self, 'heart_rate') or self.heart_rate is None:
+            self._compute_heart_rate()
+
+        ax.set_title(f'Latidos Individuales (FC Promedio: {self.heart_rate:.1f} bpm)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.show()
 
     def freq_time(self):
         pass
+
+    def _compute_heart_rate(self):
+        """
+        Método privado. Calcula la frecuencia cardíaca promedio en BPM
+        a partir de los intervalos RR obtenidos de `self.r_peaks`.
+
+        Returns:
+            float: Frecuencia cardíaca promedio en beats por minuto (BPM).
+
+        Side effects / Atributos generados:
+            - self.heart_rate : float
+                Se almacena la frecuencia cardíaca calculada.
+
+        Notes:
+            - Devuelve 0.0 si no hay suficientes picos R para calcular intervalos.
+            - Utiliza el promedio de los intervalos RR para calcular BPM.
+        """
+        if self.r_peaks is None or len(self.r_peaks) < 2:
+            return 0.0
+        
+        intervals = np.diff(self.r_peaks) / self.sfreq
+        self.heart_rate = 60.0 / np.mean(intervals)
+
+        return self.heart_rate
+    
+    def _extract_segment(self, before:float=0.2, after:float=0.5):
+        """
+        Método privado. Extrae segmentos de ECG centrados en cada pico R,
+        convirtiendo la señal en latidos individuales.
+
+        Args:
+            before : float, optional
+                Tiempo en segundos a incluir antes del pico R. Por defecto 0.2 s.
+            after : float, optional
+                Tiempo en segundos a incluir después del pico R. Por defecto 0.5 s.
+
+        Returns:
+            tuple:
+                - list of np.ndarray: Lista de segmentos individuales del ECG.
+                - np.ndarray: Vector de tiempo correspondiente a los segmentos, centrado en 0 s.
+
+        Notes:
+            - Rellena con NaN los segmentos que no puedan completar la ventana solicitada
+            por estar al inicio o final de la señal.
+            - Utiliza `self._last_channel` si la señal es multicanal.
+        """
+        samp_before = int(before * self.sfreq)
+        samp_after = int(after * self.sfreq)
+        total_length = samp_before + samp_after
+
+        if self.data.ndim == 2:
+            ch = getattr(self, '_last_channel', 0)
+            data = self.data[ch]
+        else:
+            data = self.data
+
+        segments = []
+        for r_peak in self.r_peaks:
+
+            start = max(0, r_peak - samp_before)
+            end = min(len(data), r_peak + samp_after)
+
+            segment = data[start:end]
+
+            # Rellenar con NaN si es necesario para mantener la longitud constante
+            if len(segment) < total_length:
+                # Calcular cuántas muestras faltan al inicio y al final
+                missing_start = max(0, samp_before - r_peak)
+                missing_end = total_length - len(segment) - missing_start
+                
+                # Rellenar con NaN
+                segment = np.concatenate([
+                    np.full(missing_start, np.nan),
+                    segment,
+                    np.full(missing_end, np.nan)
+                ])
+        
+            segments.append(segment)
+
+        time_vector = np.linspace(-before, after, samp_before+samp_after)
+
+        return segments, time_vector
