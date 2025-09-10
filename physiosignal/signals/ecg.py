@@ -447,10 +447,18 @@ class ECG(RawSignal):
             asociar puntos a tiempos absolutos con `first_samp`.
 
         Notes:
-            - Cada punto representa (RR_n, RR_{n+1}). El tiempo asociado al punto es el tiempo absoluto
-            del segundo pico del par: t = (r_peaks[i+2] + first_samp) / sfreq (segundo pico del par).
-            - SD1 mide variabilidad corto plazo (perpendicular a la identidad) y SD2 largo plazo (sobre la identidad).
-            - Si `by_event=True`, los puntos se colorean por etiqueta y se devuelven SD1/SD2 por evento en 'per_event'.
+            - Cada punto representa un par de intervalos consecutivos: (RR_n, RR_{n+1}).
+            - El tiempo asociado a cada punto es el tiempo absoluto del segundo pico del par:
+                t_point = (r_peaks[i+1] + first_samp) / sfreq.
+            - SD1 mide la variabilidad de corto plazo (dispersión perpendicular a la identidad).
+            - SD2 mide la variabilidad de largo plazo (dispersión a lo largo de la identidad).
+            - Leyenda: las etiquetas aparecen con el formato "<label> (n=NN)". Aquí, `n` es el número de puntos
+            ploteados para esa etiqueta, es decir la cantidad de pares (RR_n, RR_{n+1}) asignados a esa
+            condición o evento. **No** confundir con el número de picos R: si un grupo tiene `n` puntos
+            corresponde a `n+1` picos R (en general) porque cada punto consume dos picos y los puntos
+            consecutivos se solapan en un pico.
+            - Si un grupo tiene <2 puntos, SD1/SD2 no son representativos y se devuelven NaN para esas métricas.
+            - Los puntos etiquetados como 'No event' son aquellos que no caen dentro de ninguna anotación.
         """
         if self.r_peaks is None or len(self.r_peaks) < 3:
             raise ValueError("Necesitas al menos 3 picos R para Poincaré. Ejecutá peak_detection().")
@@ -524,15 +532,16 @@ class ECG(RawSignal):
 
         # Flechas (SD2 sobre identidad, SD1 perpendicular)
         ax.arrow(mean_rr, mean_rr, SD2_global/np.sqrt(2), SD2_global/np.sqrt(2),
-                color="#FF0000", width=0.0001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6)
+                color="#FF0000", width=0.001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6)
         ax.arrow(mean_rr, mean_rr, -SD1_global/np.sqrt(2), SD1_global/np.sqrt(2),
-                color="#B700FF", width=0.0001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6)
+                color="#B700FF", width=0.001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6)
 
-        ax.set_xlabel(r'$RR_n$ (s)')
-        ax.set_ylabel(r'$RR_{n+1}$ (s)')
-        ax.set_title('Poincaré Plot con SD1 y SD2')
+        ax.set_xlabel(r'$RR_n$ (s)', size=12)
+        ax.set_ylabel(r'$RR_{n+1}$ (s)', size=12)
+        ax.set_title('Poincaré Plot con SD1 y SD2', size=13)
         ax.grid(True, alpha=0.3)
         ax.legend(loc='best')
+
         plt.axis('equal')
         plt.tight_layout()
         plt.show()
