@@ -445,14 +445,10 @@ class ECG(RawSignal):
         plt.tight_layout()
         plt.show()
 
-    def poincare(self, plot:bool=True):
+    def poincare(self):
         """
         Genera un Poincaré Plot de la señal ECG usando los intervalos R-R detectados,
         mostrando la dispersión de la variabilidad de la frecuencia cardíaca beat-to-beat.
-
-        Args:
-            plot : bool, optional
-                Si True, se genera la gráfica. Por defecto True.
 
         Returns:
             None
