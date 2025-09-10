@@ -421,21 +421,19 @@ class RawSignal:
     def filter(self, low_freq:float = 1, high_freq:float = 25, order:int = 4, 
                notch_freq:float = 50.0, q:int = 30) -> RawSignal:
         """
-        Aplica filtrado pasa-banda y notch a la señal.
-
-        Filtrado:
-            1. Notch para interferencia de línea.
-            2. Butterworth pasa-banda.
+        Aplica filtrado Butterworth a la señal.
+        
+        Soporta filtros pasa-banda, pasa-alto, pasa-bajo y notch.
 
         Args:
             low_freq : float, optional
-                Corte inferior en Hz.
+                Corte inferior en Hz. Si es None, no se aplica filtro pasa-altos.
             high_freq : float, optional
-                Corte superior en Hz.
+                Corte superior en Hz. Si es None, no se aplica filtro pasa-bajos.
             order : int, optional
                 Orden del filtro Butterworth.
             notch_freq : float, optional
-                Frecuencia central del notch.
+                Frecuencia central del notch. Si es None, no se aplica filtro notch.
             q : int, optional
                 Factor de calidad del notch.
 
@@ -443,30 +441,63 @@ class RawSignal:
             RawSignal: Nueva instancia filtrada.
 
         Raises:
-            ValueError: low_freq < 0 o low_freq >= high_freq.
+            ValueError: Si los parámetros de frecuencia son inválidos.
+            ValueError: Si no se especifica al menos una frecuencia de corte.
 
         Notes:
-            - Usa filtfilt para preservar fase.
+            - Usa filtfilt para preservar fase (fase cero).
+            - Valores recomendados por tipo de señal:
+            * EEG: low_freq=0.5, high_freq=40-70
+            * ECG: low_freq=0.5-1.0, high_freq=35-40
+            * EMG: low_freq=10-20, high_freq=400-500
         """
-        import scipy.signal
+        import scipy.signal as signal
 
-        if low_freq < 0 or low_freq >= high_freq:
-            raise ValueError(f"low_freq debe ser mayor o igual a 1, y menor a high_freq")
+        # Validación de parámetros
+        if low_freq is None and high_freq is None:
+            raise ValueError("Debe especificar al menos una frecuencia de corte (low_freq o high_freq)")
 
-        # Obtengo los coeficientes del filtro notch
-        b_notch, a_notch = scipy.signal.iirnotch(notch_freq, q, self.sfreq)
+        if low_freq is not None and low_freq < 0:
+            raise ValueError("low_freq debe ser mayor o igual a 0")
 
-        # Aplico el filtro notch a la señal
-        notch_signal = scipy.signal.filtfilt(b_notch, a_notch, self.data, axis=-1)
+        if high_freq is not None and low_freq is not None and low_freq >= high_freq:
+            raise ValueError("low_freq debe ser menor que high_freq")
 
-        # Design the bandpass filter
-        b_butter, a_butter = scipy.signal.butter(order, [low_freq, high_freq], btype='band', fs=self.sfreq)
+        if high_freq is not None and high_freq > self.sfreq / 2:
+            raise ValueError(f"high_freq no puede exceder la frecuencia de Nyquist ({self.sfreq/2} Hz)")
 
-        # Aplico el filtro Butterworth a la señal filtrada
-        filtered_signal = scipy.signal.filtfilt(b_butter, a_butter, notch_signal, axis=-1)
+        # Copia de la señal para procesar
+        processed_signal = self.data.copy()
 
-        # Devuelvo nuevo objeto con señal filtrada
-        return RawSignal(data=filtered_signal, sfreq=self.sfreq, info=self.info, anotaciones=self.anotaciones, first_samp=self.first_samp)
+        # Aplicar filtro notch si se especificó
+        if notch_freq is not None:
+            if notch_freq <= 0 or notch_freq >= self.sfreq / 2:
+                raise ValueError("notch_freq debe estar entre 0 y la frecuencia de Nyquist")
+            
+            # Crear filtro notch
+            b_notch, a_notch = signal.iirnotch(notch_freq, q, self.sfreq)
+            
+            # Aplicar filtro notch
+            processed_signal = signal.filtfilt(b_notch, a_notch, processed_signal, axis=-1)
+
+        # Aplicar filtro Butterworth según los parámetros
+        if low_freq is not None and high_freq is not None:
+            # Filtro pasa-banda
+            b, a = signal.butter(order, [low_freq, high_freq], btype='band', fs=self.sfreq)
+        elif low_freq is not None:
+            # Filtro pasa-alto
+            b, a = signal.butter(order, low_freq, btype='high', fs=self.sfreq)
+        elif high_freq is not None:
+            # Filtro pasa-bajo
+            b, a = signal.butter(order, high_freq, btype='low', fs=self.sfreq)
+
+        # Aplicar el filtro Butterworth
+        filtered_signal = signal.filtfilt(b, a, processed_signal, axis=-1)
+        smoothed_data = signal.savgol_filter(filtered_signal, window_length=11, polyorder=3)
+
+        # Crear nueva instancia con la señal filtrada
+        return RawSignal(data=smoothed_data, sfreq=self.sfreq, info=self.info, 
+                        anotaciones=self.anotaciones, first_samp=self.first_samp)
 
     def pick(self, picks) -> RawSignal:
         """
