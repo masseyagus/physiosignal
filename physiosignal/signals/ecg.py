@@ -19,9 +19,12 @@ class ECG(RawSignal):
         - Detección de picos R mediante NeuroKit2 (`nk.ecg_peaks`) — se usa únicamente como detector.
         - Almacenamiento de resultados de detección en `self.peaks`, `self.info_peaks` y `self.r_peaks`.
         - `r_peaks` contiene índices **locales** (0..N-1) relativos al array procesado.
+        - `r_peaks_global` contiene los índices en la referencia del registro original
+          (local + `first_samp`) y se actualiza tras la detección de picos.
         - Alineación con anotaciones externas mediante `first_samp` (para convertir índices locales -> globales).
-        - Visualización de segmentos con marcaje de picos R y anotaciones.
-
+        - Métodos para obtener RR y HR con tiempos absolutos (útiles para agrupar por eventos).
+        - Visualización: plot de picos R, segmentación de latidos, Poincaré con SD1/SD2.
+    
     Attributes:
         data : np.ndarray
             Señal ECG cruda; forma (n_canales, n_muestras) o (n_muestras,) si mono.
@@ -33,6 +36,7 @@ class ECG(RawSignal):
             Anotaciones externas (onset en segundos absolutos, duration en segundos, description).
         first_samp : int
             Offset en muestras del primer dato de `self.data` respecto al registro original.
+            **IMPORTANTE:** todas las conversiones a tiempo absoluto usan `t = (r_peak + first_samp) / sfreq`.
         peaks : dict-like | None
             Resultado retornado por `nk.ecg_peaks` (puede incluir máscara binaria por muestra).
         info_peaks : dict-like | None
@@ -40,16 +44,16 @@ class ECG(RawSignal):
         r_peaks : np.ndarray | None
             Índices locales (dtype=int, 1D) de picos R detectados; array vacío si no hay picos.
         r_peaks_global : np.ndarray | None
-            (Se asigna en `plot_r_peaks`) Índices de picos en coordenada **global** (local + first_samp).
+            Índices de picos en coordenada **global** (local + first_samp). Se asigna tras `peak_detection`.
         heart_rate : float | None
-            Frecuencia cardiaca estimada (BPM). Inicialmente None; queda para ser poblada por la función
-            `heart_rate()` si se implementa/ejecuta por separado.
+            Frecuencia cardiaca estimada (BPM). Inicialmente None; queda para ser poblada por `find_heart_rate()` / `_compute_heart_rate()`.
 
     Notes:
         - Esta clase **no** hace preprocesado automático antes de `nk.ecg_peaks`. Debes preprocesar la señal
-        usando los métodos de la clase RawSignal
-        - `first_samp` es crucial: `r_peaks` son relativos a la señal que se pasó a `nk.ecg_peaks`;
-        para mapearlos a la referencia del registro original sumá `first_samp`.
+          usando los métodos de la clase RawSignal cuando sea necesario.
+        - `first_samp` se interpreta como número de muestras de offset; convertílo a `int`.
+        - Para análisis por evento (ej. agrupar HR o colorear Poincaré por anotación) usá los tiempos
+          devueltos por `_get_rr_intervals(return_times=True)` o `_get_instantaneous_hr()`.
     """
 
     def __init__(self, raw:RawSignal=None, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
@@ -68,16 +72,17 @@ class ECG(RawSignal):
                 Metadatos de canales.
             anotaciones : Annotations, optional
                 Eventos con columnas `onset` (s absolutos), `duration` (s) y `description`.
+                **Nota:** se asume que `onset` y `duration` están en segundos; si están en muestras,
+                convertílos a segundos antes de crear la instancia.
             first_samp : int, optional
                 Offset en muestras del primer dato de `self.data` respecto al inicio del registro original.
-                Por defecto 0.
+                Por defecto 0. Se almacena como `int(self.first_samp)`.
             see_log : bool, optional
                 Controla la configuración del logger interno.
 
-        Notes:
-            - Si se pasa `raw`, el constructor hace una copia profunda de sus atributos y preserva `first_samp`.
-            - Inicialmente `peaks`, `info_peaks`, `r_peaks`, `r_peaks_global` y `heart_rate` se establecen en None o arrays vacíos.
-            - `heart_rate` quedará en None hasta que se ejecute la función `heart_rate()`.
+        Behavior / Side effects:
+            - Inicializa atributos: `peaks`, `info_peaks`, `r_peaks`, `r_peaks_global`, `heart_rate`.
+            - No ejecuta detección de picos automáticamente: llamá a `peak_detection()` cuando quieras poblar `r_peaks`.
         """
         from copy import deepcopy
         if raw is not None:
@@ -102,7 +107,8 @@ class ECG(RawSignal):
 
     def peak_detection(self, channel:int=0):
         """
-        Detecta picos R usando NeuroKit2 (`nk.ecg_peaks`) sobre un canal seleccionado.
+        Detecta picos R usando NeuroKit2 (`nk.ecg_peaks`) sobre un canal seleccionado y guarda
+        índices locales y globales.
 
         Args:
             channel : int, optional
@@ -110,40 +116,26 @@ class ECG(RawSignal):
                 Por defecto 0. Si `self.data` es 1D, se procesa esa señal.
 
         Returns:
-            None
+            tuple: (peaks, info_peaks)
+                - peaks: DataFrame/dict-like devuelto por `nk.ecg_peaks`.
+                - info_peaks: diccionario de información de NeuroKit2.
 
         Side effects / Atributos generados:
             - self.peaks : dict-like
-                DataFrame o dict-like devuelto por `nk.ecg_peaks`. Puede contener una máscara `ECG_R_Peaks`.
             - self.info_peaks : dict-like
-                Diccionario de información (puede incluir `ECG_R_Peaks` con índices).
-            - self.r_peaks : np.ndarray
-                Índices locales (enteros, 1D) de picos R normalizados desde `info_peaks` o desde la máscara en `peaks`.
-                Si no se encuentran picos, se asigna un array vacío dtype=int.
+            - self.r_peaks : np.ndarray (índices locales, enteros)
+            - self.r_peaks_global : np.ndarray (índices globales, enteros) == self.r_peaks + int(self.first_samp)
+            - self._last_channel : canal procesado (int)
 
         Raises:
             ValueError:
                 Si `channel` está fuera de rango cuando `self.data` es multicanal.
 
         Notes:
-            - Este método **no** aplica filtros ni limpieza extra; usa `nk.ecg_peaks` exclusivamente como detector.
-            - `nk.ecg_peaks` puede devolver picos como índices (`info_peaks['ECG_R_Peaks']`) o como máscara
-            booleana/numérica en `peaks['ECG_R_Peaks']`; el método convierte ambas formas a `self.r_peaks`.
-            - Para obtener índices en la escala del registro original usar `self.r_peaks + self.first_samp`.
-
-        Examples:
-            >>> # Señal mono en instancia
-            >>> ecg = ECG(data=my_ecg_1d, sfreq=512.0, first_samp=1536)
-            >>> ecg.peak_detection()                    # detecta picos en el canal 0
-            >>> print(ecg.r_peaks[:10])                 # índices locales (0..N-1)
-            >>> print(ecg.r_peaks + ecg.first_samp)     # índices globales (registro original)
-
-            >>> # Señal multicanal: procesar canal 1
-            >>> ecg = ECG(data=my_multi_chan, sfreq=500.0, first_samp=0)
-            >>> ecg.peak_detection(channel=1)
-            >>> len(ecg.r_peaks)                        # número de picos detectados en el canal 1
+            - `r_peaks` son relativos a la porción de señal pasada al detector (índices locales).
+            - `r_peaks_global` está en la referencia del registro original y es el valor que
+            debés usar para comparar con `self.anotaciones` (que se asumen en segundos).
         """
-        
         if self.data.ndim == 2:
             if channel >= self.data.shape[0]:
                 raise ValueError(f"Canal {channel} fuera de rango. La señal tiene {self.data.shape[0]} canales.")
@@ -167,6 +159,11 @@ class ECG(RawSignal):
         else:
             self.r_peaks = np.array([], dtype=int)
 
+        try:
+            self.r_peaks_global = (self.r_peaks.astype(int) + int(self.first_samp))
+        except Exception:
+            self.r_peaks_global = None
+
         self._last_channel = channel
 
         return peaks, info_peaks
@@ -179,18 +176,16 @@ class ECG(RawSignal):
         Args:
             tmin : int or float, optional
                 Tiempo inicial en segundos ABSOLUTO respecto al inicio del registro original.
-                Por defecto 0
+                Por defecto 0.
             tmax : int or float, optional
                 Tiempo final en segundos ABSOLUTO respecto al inicio del registro original.
-                Debe cumplirse tmin < tmax.
-                Por defecto 10
+                Debe cumplirse tmin < tmax. Por defecto 10.
             plot_raw : bool, optional
-                Si True, también grafica la señal cruda (`ECG_Raw`) retornada en `self.peaks`.
-                Por defecto es False
+                Si True, también grafica la señal cruda (`raw_signal`) si se provee.
             show_ann : bool, optional
-                Si True, dibuja líneas verticales y etiquetas para las anotaciones en `self.anotaciones`
-                que caigan dentro de la ventana [tmin, tmax].
-                Por defecto True
+                Si True, dibuja líneas/zonas para las anotaciones en `self.anotaciones`.
+            raw_signal : np.ndarray | None, optional
+                Señal cruda asociada (misma forma que self.data) para superponer si `plot_raw=True`.
 
         Returns:
             None
@@ -204,37 +199,16 @@ class ECG(RawSignal):
 
         Behavior / Notes:
             - Conversión muestras/tiempo:
-                start_global = int(tmin * sfreq)
-                end_global   = int(tmax * sfreq)
+                start_global = int(tmin * self.sfreq)
+                end_global   = int(tmax * self.sfreq)
             Para indexar arrays locales (los devueltos por NeuroKit2) usar:
-                start_local = start_global - self.first_samp
-                end_local   = end_global - self.first_samp
-            El método hace clipping automático para no salir de los límites locales.
-            - Picos:
-                * `self.r_peaks` son índices locales (0..N-1).
-                * `picks_global = self.r_peaks + self.first_samp` son índices en coordenada global.
-            En el scatter se dibujan las abscisas en segundos absolutos: `picks_global / self.sfreq`.
-            - Anotaciones:
-                * `self.anotaciones.onset` se asume en segundos absolutos. Se convierten a muestras
-                globales con `onsets_global = (onsets_seconds * sfreq).astype(int)` y solo se muestran
-                las que caen dentro de la ventana solicitada.
-            - El método asigna `self.r_peaks_global = r_peaks_local + int(self.first_samp)` como atributo
-            auxiliar disponible tras el plot.
-
-        Examples:
-            >>> # Mostrar 30–36 s del registro (tmin/tmax son tiempos absolutos)
-            >>> ecg = ECG(data=my_ecg_1d, sfreq=512.0, first_samp=1536)
-            >>> ecg.peak_detection()
-            >>> ecg.plot_r_peaks(tmin=30, tmax=36, plot_raw=True, show_ann=True)
-
-            >>> # Si la señal procesada no comienza en 0 (first_samp>0), tmin/tmax siguen siendo absolutos:
-            >>> # Para ver la porción local correspondiente, el método calcula start_local = int(30*sfreq) - first_samp.
-            >>> ecg.plot_r_peaks(tmin=30, tmax=36)
-
-            >>> # Si solo querés ver la señal limpia (sin la cruda)
-            >>> ecg.plot_r_peaks(tmin=10, tmax=12, plot_raw=False, show_ann=False)
+                start_local = start_global - int(self.first_samp)
+                end_local   = end_global - int(self.first_samp)
+            - El método asigna `self.r_peaks_global = self.r_peaks + int(self.first_samp)` y usa
+            `picks_global / self.sfreq` para colocar los marcadores en segundos absolutos.
+            - `self.anotaciones.onset` y `duration` se interpretan en segundos absolutos; las franjas
+            de anotación se dibujan si se solapan con la ventana [tmin, tmax].
         """
-
         if not hasattr(self, 'peaks') or not hasattr(self, 'info_peaks'):
              raise ValueError("No existe el atributo peaks/info_peaks: llamá primero a process_signal().")
 
@@ -369,7 +343,8 @@ class ECG(RawSignal):
 
         Notes:
             - Este método depende de que `peak_detection()` haya sido ejecutado.
-            - Internamente llama a `_compute_heart_rate()` para obtener el valor.
+            - Internamente llama a `_compute_heart_rate()` que usa `_get_rr_intervals()` para
+            obtener intervalos RR (en segundos) y asegura que los tiempos absolutos están disponibles.
         """
         if self.r_peaks is None:
             raise ValueError("Primero debe detectar los picos R usando peak_detection()")
@@ -389,16 +364,18 @@ class ECG(RawSignal):
 
         Raises:
             ValueError:
-                Si no se han detectado picos R previamente (`self.r_peaks` es None).
+                Si no se han detectado picos R previamente (`self.r_peaks` is None).
 
         Side effects / Atributos generados:
             - self.heart_rate : float
                 Se asegura de estar calculada antes de graficar.
 
         Notes:
-            - Se generan segmentos de ECG centrados en cada pico R mediante `_extract_segment`.
-            - Cada segmento se grafica con transparencia y se superpone la curva promedio.
-            - La frecuencia cardíaca promedio se muestra en el título del gráfico.
+            - Este método utiliza `_extract_segment()` para generar latidos individuales y `_get_instantaneous_hr()`
+            para obtener HR por latido y sus tiempos absolutos (útiles para análisis por evento).
+            - En presencia de `self.anotaciones`, el método puede calcular promedios de HR por evento
+            usando los tiempos absolutos devueltos por `_get_instantaneous_hr()`.
+            - Las unidades en los ejes son segundos y µV respectivamente.
         """
         if self.r_peaks is None:
             raise ValueError("Primero debe detectar los picos R usando peak_detection()")
@@ -445,143 +422,246 @@ class ECG(RawSignal):
         plt.tight_layout()
         plt.show()
 
-    def poincare(self):
+    def poincare(self, by_event: bool = False, annotate_values: bool = True):
         """
-        Genera un Poincaré Plot de la señal ECG usando los intervalos R-R detectados,
-        mostrando la dispersión de la variabilidad de la frecuencia cardíaca beat-to-beat.
+        Poincaré plot de RR_n vs RR_{n+1} con SD1/SD2. Opcionalmente colorea puntos por anotaciones
+        (self.anotaciones) y calcula SD1/SD2 por evento.
+
+        Args:
+            by_event : bool, optional
+                Si True, colorea cada punto según la anotación (se asigna cada punto al evento cuyo
+                tiempo (segundo pico del par RR) satisface onset <= t < onset+duration).
+            annotate_values : bool, optional
+                Si True, muestra SD1/SD2 globales en el gráfico.
 
         Returns:
-            None
-
-        Side effects / Atributos generados:
-            - SD1 : float
-                Desviación estándar perpendicular a la línea de identidad (variabilidad de corto plazo).
-            - SD2 : float
-                Desviación estándar a lo largo de la línea de identidad (variabilidad de largo plazo).
+            dict: métricas calculadas
+                {'SD1_global': float, 'SD2_global': float, 'per_event': {label: (sd1, sd2, n_points)}}.
 
         Raises:
             ValueError:
-                - Si `self.r_peaks` es None o no se han detectado picos R previamente 
-                (llamar primero a `peak_detection()`).
+                Si `self.r_peaks` no contiene suficientes picos (necesita al menos 3 picos para un Poincaré).
 
-        Behavior / Notes:
-            - Cada punto en el plot representa un par de intervalos consecutivos: (RR_n, RR_n+1).
-            - La línea discontinua azul indica la identidad (y = x).
-            - La elipse negra representa SD1 (eje menor, perpendicular a identidad) y SD2 (eje mayor, sobre identidad).
-            - Flechas de colores muestran la dirección y magnitud de SD1 (morado) y SD2 (rojo).
-            - El gráfico es cuadrado (`axis('equal')`) para evitar distorsión de la elipse.
+        Side effects:
+            - No modifica `self.r_peaks`. No obstante, usa `_get_rr_intervals(return_times=True)` para
+            asociar puntos a tiempos absolutos con `first_samp`.
 
-        Examples:
-            >>> ecg = ECG(data=my_ecg, sfreq=512.0)
-            >>> ecg.peak_detection()
-            >>> ecg.poincare()  # Genera el Poincaré Plot con SD1, SD2 y línea identidad
+        Notes:
+            - Cada punto representa (RR_n, RR_{n+1}). El tiempo asociado al punto es el tiempo absoluto
+            del segundo pico del par: t = (r_peaks[i+2] + first_samp) / sfreq (segundo pico del par).
+            - SD1 mide variabilidad corto plazo (perpendicular a la identidad) y SD2 largo plazo (sobre la identidad).
+            - Si `by_event=True`, los puntos se colorean por etiqueta y se devuelven SD1/SD2 por evento en 'per_event'.
         """
-        if not hasattr(self, 'r_peaks'):
-            raise ValueError("Primero debe usar peak_detection()")
-        
-        rr_intervals = np.diff(self.r_peaks) / self.sfreq
+        if self.r_peaks is None or len(self.r_peaks) < 3:
+            raise ValueError("Necesitas al menos 3 picos R para Poincaré. Ejecutá peak_detection().")
 
-        rr_n = rr_intervals[:-1]
-        rr_n1 = rr_intervals[1:]
+        rr, times = self._get_rr_intervals(return_times=True)  # rr: N-1, times: N-1 (time of second peak)
+        rr_n  = rr[:-1]
+        rr_n1 = rr[1:]
+        times_pairs = times[:-1]  # tiempo asociado a cada punto (opcional)
 
-        # SD1 y SD2
+        # SD1/SD2 global
         diff = rr_n1 - rr_n
         sum_  = rr_n1 + rr_n
-
-        SD1 = np.std(diff) / np.sqrt(2)
-        SD2 = np.std(sum_) / np.sqrt(2)
-
-        # Centro de la elipse
-        mean_rr = np.mean(rr_intervals)
+        SD1_global = np.std(diff) / np.sqrt(2)
+        SD2_global = np.std(sum_) / np.sqrt(2)
 
         fig, ax = plt.subplots(figsize=(8, 8))
-        
-        # Datos 
-        ax.scatter(rr_n, rr_n1, color="#63DC7B", alpha=0.6, zorder=1, label='Intervalos R-R')
+        cmap = None
+        per_event = {}
+
+        if by_event and getattr(self, 'anotaciones', None) is not None:
+            # Construir etiquetas por intervalo
+            onsets = np.asarray(self.anotaciones.onset, dtype=float)
+            durations = np.asarray(self.anotaciones.duration, dtype=float)
+            descs = np.asarray(self.anotaciones.description, dtype=object)
+
+            labels = np.array(['__no_event__'] * len(times_pairs), dtype=object)
+
+            for onset, dur, desc in zip(onsets, durations, descs):
+                start = onset
+                end = onset + max(0.0, dur)
+                mask = (times_pairs >= start) & (times_pairs < end)
+                labels[mask] = str(desc)
+
+            unique_labels = np.unique(labels)
+            # Color map
+            import matplotlib.cm as cm
+            cmap = cm.get_cmap('tab10', len(unique_labels))
+
+            for i, lab in enumerate(unique_labels):
+                mask = labels == lab
+                if lab == '__no_event__':
+                    lab_name = 'No event'
+                else:
+                    lab_name = lab
+                ax.scatter(rr_n[mask], rr_n1[mask], label=f'{lab_name} (n={mask.sum()})',
+                        alpha=0.7, s=20, zorder=2, c=[cmap(i)])
+                # calcular SD1/SD2 por evento y guardarlo
+                if mask.sum() >= 2:
+                    d = (rr_n1[mask] - rr_n[mask])
+                    s = (rr_n1[mask] + rr_n[mask])
+                    sd1 = np.std(d) / np.sqrt(2)
+                    sd2 = np.std(s) / np.sqrt(2)
+                else:
+                    sd1 = np.nan
+                    sd2 = np.nan
+                per_event[lab] = (sd1, sd2, int(mask.sum()))
+        else:
+            ax.scatter(rr_n, rr_n1, color="#63DC7B", alpha=0.6, zorder=1, label='Intervalos R-R')
 
         # Línea identidad
         min_rr = min(np.min(rr_n), np.min(rr_n1))
         max_rr = max(np.max(rr_n), np.max(rr_n1))
         ax.plot([min_rr, max_rr], [min_rr, max_rr], color="#0008FF", linestyle='--', label='Línea identidad', zorder=3)
-        
-        # Dibujar elipse SD1/SD2
+
+        # Elipse global
         from matplotlib.patches import Ellipse
-        ellipse = Ellipse(
-            xy=(mean_rr, mean_rr),
-            width=2*SD2,
-            height=2*SD1,
-            angle=45,
-            edgecolor="#000000",
-            fc='None',
-            lw=2,
-            zorder=5
-        )
+        mean_rr = np.mean(rr)
+        ellipse = Ellipse(xy=(mean_rr, mean_rr), width=2*SD2_global, height=2*SD1_global,
+                        angle=45, edgecolor="#000000", fc='None', lw=1.5, zorder=4)
         ax.add_patch(ellipse)
 
-        # Flecha SD2
-        ax.arrow(mean_rr, mean_rr, SD2/np.sqrt(2), SD2/np.sqrt(2), color="#FF0000", width=0.001, head_width=0.01, 
-                 length_includes_head=True, label='SD2', zorder=6)
-        # Flecha SD1
-        ax.arrow(mean_rr, mean_rr, -SD1/np.sqrt(2), SD1/np.sqrt(2), color="#B700FF", width=0.001, head_width=0.01, 
-                 length_includes_head=True, label='SD1', zorder=6)
+        # Flechas (SD2 sobre identidad, SD1 perpendicular)
+        ax.arrow(mean_rr, mean_rr, SD2_global/np.sqrt(2), SD2_global/np.sqrt(2),
+                color="#FF0000", width=0.0001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6)
+        ax.arrow(mean_rr, mean_rr, -SD1_global/np.sqrt(2), SD1_global/np.sqrt(2),
+                color="#B700FF", width=0.0001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6)
 
         ax.set_xlabel(r'$RR_n$ (s)')
         ax.set_ylabel(r'$RR_{n+1}$ (s)')
         ax.set_title('Poincaré Plot con SD1 y SD2')
         ax.grid(True, alpha=0.3)
-        ax.legend()
-
+        ax.legend(loc='best')
         plt.axis('equal')
         plt.tight_layout()
         plt.show()
 
+        result = {'SD1_global': float(SD1_global), 'SD2_global': float(SD2_global), 'per_event': per_event}
+        if annotate_values:
+            # Añadir texto resumen en la gráfica (puede adaptarse la posición)
+            txt = f"SD1={SD1_global:.3f}s  SD2={SD2_global:.3f}s"
+            ax.text(0.02, 0.98, txt, transform=ax.transAxes, va='top')
+        return result
+
     def freq_time(self):
         pass
 
+    def _get_rr_intervals(self, return_times: bool = True):
+        """
+        Devuelve los intervalos R-R (segundos) y — opcionalmente — los tiempos absolutos (s)
+        asociados a cada intervalo (tiempo del segundo pico del par), usando `first_samp`.
+
+        Args:
+            return_times : bool, optional
+                Si True, devuelve (rr_intervals, times). Si False, devuelve solo rr_intervals.
+                `times` corresponde al instante absoluto (segundos) del **segundo** pico en cada par RR:
+                times[i] = (r_peaks[i+1] + first_samp) / sfreq.
+
+        Returns:
+            rr : np.ndarray (N-1,)
+                Intervalos RR en segundos.
+            times : np.ndarray (N-1,) (opcional)
+                Tiempos absolutos (s) del segundo pico de cada intervalo, adecuados para comparar con `anotaciones`.
+
+        Notes:
+            - Si no hay suficientes picos (len(r_peaks) < 2) devuelve arrays vacíos.
+            - `first_samp` se incorpora en la conversión a tiempos absolutos: r_global = r_local + int(first_samp).
+        """
+        if self.r_peaks is None or len(self.r_peaks) < 2:
+            if return_times:
+                return np.array([], dtype=float), np.array([], dtype=float)
+            
+            return np.array([], dtype=float)
+
+        r = np.asarray(self.r_peaks).astype(int)
+        rr = np.diff(r).astype(float) / float(self.sfreq)
+
+        if return_times:
+            r_global = r + int(self.first_samp)
+            times = r_global[1:] / float(self.sfreq)
+
+            return rr, times
+
+        return rr
+    
+    def _get_instantaneous_hr(self):
+        """
+        Devuelve la frecuencia instantánea por latido (BPM) y sus tiempos absolutos.
+
+        Returns:
+            hr : np.ndarray (N-1,)
+                Frecuencia instantánea por intervalo en BPM (60 / RR[s]).
+            times : np.ndarray (N-1,)
+                Tiempos absolutos (s) asociados a cada HR (tiempo del segundo pico del par),
+                calculados como (r_peaks[1:] + first_samp) / sfreq.
+
+        Notes:
+            - Usa `_get_rr_intervals(return_times=True)` para garantizar que los tiempos absolutos
+            incorporen `first_samp`.
+            - Si no hay intervalos válidos devuelve arrays vacíos.
+        """
+        rr, times = self._get_rr_intervals(return_times=True)
+
+        if rr.size == 0:
+            return np.array([], dtype=float), np.array([], dtype=float)
+        
+        hr = 60.0 / rr
+        return hr, times
+
     def _compute_heart_rate(self):
         """
-        Método privado. Calcula la frecuencia cardíaca promedio en BPM
-        a partir de los intervalos RR obtenidos de `self.r_peaks`.
+        Método privado. Calcula la frecuencia cardíaca promedio en BPM a partir de los intervalos RR
+        obtenidos por `_get_rr_intervals()`.
 
         Returns:
             float: Frecuencia cardíaca promedio en beats por minuto (BPM).
 
-        Side effects / Atributos generados:
+        Side effects:
             - self.heart_rate : float
-                Se almacena la frecuencia cardíaca calculada.
+                Se almacena la frecuencia cardíaca calculada (0.0 si no hay intervalos válidos).
 
         Notes:
-            - Devuelve 0.0 si no hay suficientes picos R para calcular intervalos.
-            - Utiliza el promedio de los intervalos RR para calcular BPM.
+            - Este método usa `_get_rr_intervals()` (que incorpora `first_samp`) para calcular
+            la media de los intervalos RR en segundos y convertir a BPM.
         """
-        if self.r_peaks is None or len(self.r_peaks) < 2:
-            return 0.0
-        
-        intervals = np.diff(self.r_peaks) / self.sfreq
-        self.heart_rate = 60.0 / np.mean(intervals)
+        rr, _ = self._get_rr_intervals(return_times=True)
 
+        if rr.size < 1:
+            self.heart_rate = 0.0
+
+            return self.heart_rate
+
+        self.heart_rate = 60.0 / np.mean(rr)
         return self.heart_rate
     
-    def _extract_segment(self, before:float=0.2, after:float=0.5):
+    def _extract_segment(self, before:float=0.2, after:float=0.5, return_peak_times:bool=False):
         """
-        Método privado. Extrae segmentos de ECG centrados en cada pico R,
-        convirtiendo la señal en latidos individuales.
+        Método privado. Extrae segmentos de ECG centrados en cada pico R (latidos individuales).
 
         Args:
             before : float, optional
                 Tiempo en segundos a incluir antes del pico R. Por defecto 0.2 s.
             after : float, optional
                 Tiempo en segundos a incluir después del pico R. Por defecto 0.5 s.
+            return_peak_times : bool, optional
+                Si True, además de (segments, time_vector) devuelve un array con los tiempos absolutos
+                (segundos) del pico R usado para cada segmento:
+                    peak_time_i = (r_peak_i + first_samp) / sfreq.
 
         Returns:
-            tuple:
-                - list of np.ndarray: Lista de segmentos individuales del ECG.
-                - np.ndarray: Vector de tiempo correspondiente a los segmentos, centrado en 0 s.
+            segments : list[np.ndarray]
+                Lista de segmentos individuales (cada uno puede contener NaN si corta en los bordes).
+            time_vector : np.ndarray
+                Vector de tiempo centrado en 0 con longitud samp_before + samp_after.
+            peak_times : np.ndarray (opcional)
+                Tiempos absolutos en segundos del pico R para cada segmento (solo si return_peak_times True).
 
         Notes:
-            - Rellena con NaN los segmentos que no puedan completar la ventana solicitada
-            por estar al inicio o final de la señal.
-            - Utiliza `self._last_channel` si la señal es multicanal.
+            - Rellena con NaN los segmentos que no puedan completar la ventana solicitada por
+            estar al inicio o final de la señal.
+            - Emplea `self._last_channel` si la señal es multicanal para seleccionar el canal procesado.
+            - Los tiempos absolutos devueltos usan `first_samp` para mapear índices locales → globales.
         """
         samp_before = int(before * self.sfreq)
         samp_after = int(after * self.sfreq)
@@ -594,7 +674,9 @@ class ECG(RawSignal):
             data = self.data
 
         segments = []
-        for r_peak in self.r_peaks:
+        peak_times = []
+
+        for r_peak in np.asarray(self.r_peaks).astype(int):
 
             start = max(0, r_peak - samp_before)
             end = min(len(data), r_peak + samp_after)
@@ -616,6 +698,13 @@ class ECG(RawSignal):
         
             segments.append(segment)
 
+            # Tiempo absoluto del pico R (segundos) usando first_samp
+            peak_times.append((int(r_peak) + int(self.first_samp)) / float(self.sfreq))
+
         time_vector = np.linspace(-before, after, samp_before+samp_after)
 
+        if return_peak_times:
+            return segments, time_vector, np.asarray(peak_times)
+        
         return segments, time_vector
+
