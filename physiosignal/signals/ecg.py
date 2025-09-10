@@ -445,6 +445,100 @@ class ECG(RawSignal):
         plt.tight_layout()
         plt.show()
 
+    def poincare(self, plot:bool=True):
+        """
+        Genera un Poincaré Plot de la señal ECG usando los intervalos R-R detectados,
+        mostrando la dispersión de la variabilidad de la frecuencia cardíaca beat-to-beat.
+
+        Args:
+            plot : bool, optional
+                Si True, se genera la gráfica. Por defecto True.
+
+        Returns:
+            None
+
+        Side effects / Atributos generados:
+            - SD1 : float
+                Desviación estándar perpendicular a la línea de identidad (variabilidad de corto plazo).
+            - SD2 : float
+                Desviación estándar a lo largo de la línea de identidad (variabilidad de largo plazo).
+
+        Raises:
+            ValueError:
+                - Si `self.r_peaks` es None o no se han detectado picos R previamente 
+                (llamar primero a `peak_detection()`).
+
+        Behavior / Notes:
+            - Cada punto en el plot representa un par de intervalos consecutivos: (RR_n, RR_n+1).
+            - La línea discontinua azul indica la identidad (y = x).
+            - La elipse negra representa SD1 (eje menor, perpendicular a identidad) y SD2 (eje mayor, sobre identidad).
+            - Flechas de colores muestran la dirección y magnitud de SD1 (morado) y SD2 (rojo).
+            - El gráfico es cuadrado (`axis('equal')`) para evitar distorsión de la elipse.
+
+        Examples:
+            >>> ecg = ECG(data=my_ecg, sfreq=512.0)
+            >>> ecg.peak_detection()
+            >>> ecg.poincare()  # Genera el Poincaré Plot con SD1, SD2 y línea identidad
+        """
+        if not hasattr(self, 'r_peaks'):
+            raise ValueError("Primero debe usar peak_detection()")
+        
+        rr_intervals = np.diff(self.r_peaks) / self.sfreq
+
+        rr_n = rr_intervals[:-1]
+        rr_n1 = rr_intervals[1:]
+
+        # SD1 y SD2
+        diff = rr_n1 - rr_n
+        sum_  = rr_n1 + rr_n
+
+        SD1 = np.std(diff) / np.sqrt(2)
+        SD2 = np.std(sum_) / np.sqrt(2)
+
+        # Centro de la elipse
+        mean_rr = np.mean(rr_intervals)
+
+        fig, ax = plt.subplots(figsize=(8, 8))
+        
+        # Datos 
+        ax.scatter(rr_n, rr_n1, color="#63DC7B", alpha=0.6, zorder=1, label='Intervalos R-R')
+
+        # Línea identidad
+        min_rr = min(np.min(rr_n), np.min(rr_n1))
+        max_rr = max(np.max(rr_n), np.max(rr_n1))
+        ax.plot([min_rr, max_rr], [min_rr, max_rr], color="#0008FF", linestyle='--', label='Línea identidad', zorder=3)
+        
+        # Dibujar elipse SD1/SD2
+        from matplotlib.patches import Ellipse
+        ellipse = Ellipse(
+            xy=(mean_rr, mean_rr),
+            width=2*SD2,
+            height=2*SD1,
+            angle=45,
+            edgecolor="#000000",
+            fc='None',
+            lw=2,
+            zorder=5
+        )
+        ax.add_patch(ellipse)
+
+        # Flecha SD2
+        ax.arrow(mean_rr, mean_rr, SD2/np.sqrt(2), SD2/np.sqrt(2), color="#FF0000", width=0.001, head_width=0.01, 
+                 length_includes_head=True, label='SD2', zorder=6)
+        # Flecha SD1
+        ax.arrow(mean_rr, mean_rr, -SD1/np.sqrt(2), SD1/np.sqrt(2), color="#B700FF", width=0.001, head_width=0.01, 
+                 length_includes_head=True, label='SD1', zorder=6)
+
+        ax.set_xlabel(r'$RR_n$ (s)')
+        ax.set_ylabel(r'$RR_{n+1}$ (s)')
+        ax.set_title('Poincaré Plot con SD1 y SD2')
+        ax.grid(True, alpha=0.3)
+        ax.legend()
+
+        plt.axis('equal')
+        plt.tight_layout()
+        plt.show()
+
     def freq_time(self):
         pass
 
