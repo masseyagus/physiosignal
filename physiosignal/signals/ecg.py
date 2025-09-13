@@ -561,7 +561,7 @@ class ECG(RawSignal):
         return result
 
     def dt_waves(self, channels:dict=None, low_freq:float=0.5, high_freq:float=40.0, order:int=5,
-                 delineate_method:str='dwt', plot_waves:bool=True, tmin:float=0.0, tmax:float=10.0):
+                 delineate_method:str='dwt', plot_waves:bool=True, tmin:float=0.0, tmax:float=None):
         """
         Detección y delineado de ondas P/Q/R/S/T usando NeuroKit2 en una ventana temporal.
 
@@ -594,9 +594,8 @@ class ECG(RawSignal):
                 Tiempo inicial ABSOLUTO en segundos (desde el inicio del registro original).
                 Por defecto 0.0.
             tmax : float, optional
-                Tiempo final ABSOLUTO en segundos. Si (tmax - tmin) es menor que una ventana
-                mínima interna (min_window_seconds = 4.0 s), la función extiende tmax para
-                garantizar la ventana mínima. Por defecto 10.0.
+                Tiempo final ABSOLUTO en segundos. Si es None, se usa min_tmax() para hallar
+                un tmax óptimo. Por defecto None.
 
         Returns:
             dict:
@@ -673,13 +672,10 @@ class ECG(RawSignal):
         if channels is None:
             channels = list(range(n_channels))
 
-        min_window_seconds = 4.0   # mínimo recomendado
-        # forzar tipo float y coherencia
-        tmin = float(tmin)
-        tmax = float(tmax)
-
-        if (tmax - tmin) < min_window_seconds:
-            tmax = tmin + min_window_seconds
+        # Si tmax no se especifica, lo calculamos automáticamente
+        if tmax is None:
+            tmax = tmin + self.min_tmax(n_beats=4, use_percentile=True, safety=1.5) 
+            logging.info(f"tmax no especificado: usando tmax={tmax:.2f}s para al menos 4 latidos (percentil 95).")
 
         t_min_samps = int(max(0, np.floor(tmin * self.sfreq)))
         t_max_samps = int(np.ceil(tmax * self.sfreq))
@@ -824,7 +820,7 @@ class ECG(RawSignal):
             }
 
             if plot_waves:
-                fig, ax = plt.subplots(figsize=(10, 6))
+                fig, ax = plt.subplots(figsize=(12, 6))
 
                 # x axis en segundos alineada con los tiempos globales
                 x_axis = (np.arange(sig_clean.size) + global_offset) / float(self.sfreq)
@@ -839,8 +835,11 @@ class ECG(RawSignal):
                         ax.scatter(arr_global[valid_mask] / float(self.sfreq), sig_clean[arr[valid_mask]],
                                 label=f'Picos {key}', s=30, zorder=3)
 
-                ax.legend()
-                ax.set_xlabel('Time (s)')
+                ax.set_xlabel('Tiempo (s)')
+                ax.set_ylabel('Amplitud (µV)')
+                ax.set_title(f'Delineación de Ondas ECG - Canal {ch} - Ventana [{tmin:.1f}–{tmax:.1f}]s')
+
+                ax.legend(loc='best')
                 ax.grid(True, linestyle='--', alpha=0.5)
                 plt.show()
         
@@ -849,30 +848,96 @@ class ECG(RawSignal):
     def freq_time(self):
         pass
 
-    def min_tmax(self, n_cycles:int=3, safety:float=1.2, use_percentile:bool=True) -> float:
+    def signal_quality(self):
         """
-        Estima un tmax adecuado basado en los intervalos RR para garantizar 
-        que se capturen suficientes latidos para análisis.
+        Evalúa la calidad de la señal ECG basándose en métricas de detección de picos R.
         
-        Args:
-            n_beats: Número de latidos que se desean capturar
-            use_percentile: Si True, usa el percentil 95 para cubrir latidos más largos
-            safety: Factor de seguridad para asegurar suficiente margen
+        La calidad se determina considerando:
+        - Cantidad de picos R detectados: Más picos indican mayor confiabilidad
+        - Variabilidad de los intervalos RR: Menor variabilidad indica señal más estable
         
         Returns:
-            float: Tiempo estimado en segundos para una ventana adecuada
+            dict: Diccionario con métricas de calidad:
+                - 'calidad' (str): Evaluación cualitativa: "mala", "media", "buena", "variable"
+                - 'confianza' (float): Valor entre 0.0-1.0 basado en número de picos detectados
+                - 'n_picos' (int): Número total de picos R detectados
+                - 'coef_var' (float): Coeficiente de variación de los intervalos RR
+        
+        Notes:
+            - Calidad "mala": Menos de 2 picos R detectados
+            - Calidad "media": 2-4 picos R detectados
+            - Calidad "buena": 5+ picos R con baja variabilidad (CV < 0.3)
+            - Calidad "variable": 5+ picos R con alta variabilidad (CV ≥ 0.3)
+            - La confianza se calcula como min(1.0, n_picos/10.0)
+        """
+        if self.r_peaks is None or len(self.r_peaks) < 2:
+            return {'calidad': "mala", 'confianza': 0.0}
+
+        rr_intervals = self.rr_intervals    
+        cv = np.std(rr_intervals) / np.mean(rr_intervals) if len(rr_intervals) > 0 else 0.0
+
+        if cv >= 0.3:
+            calidad = "variable"
+        elif len(self.r_peaks) < 5:
+            calidad = "media"
+        else:
+            calidad = "buena"
+
+        confianza = min(1.0, len(self.r_peaks) / 10.0)
+
+        return {'calidad': calidad, 'confianza': confianza, 
+                'n_picos': len(self.r_peaks), 'coef_var': round(cv, 3)}
+
+    def min_tmax(self, n_beats:int=3, safety:float=1.2, use_percentile:bool=True) -> float:
+        """
+        Calcula un tiempo máximo (tmax) recomendado para análisis de ECG.
+        
+        Este método estima la duración necesaria para capturar un número específico de latidos
+        cardíacos, considerando la variabilidad natural del ritmo cardíaco.
+        
+        Args:
+            n_beats: Número de latidos que se desea capturar (por defecto 3)
+            safety: Factor de seguridad para acomodar variabilidad (por defecto 1.2 = 20% extra de tiempo)
+            use_percentile: Si True, usa el percentil 95 para cubrir latidos más largos
+        
+        Returns:
+            float: Duración estimada en segundos para la ventana de análisis
+        
+        Notes:
+            - Si no hay intervalos RR disponibles, se asume un intervalo de 1.0s (60 LPM)
+            - El percentil 95 es más conservador que la media para señales con arritmias
+            - El factor de seguridad asegura que se capturen suficientes latidos incluso
+            con variabilidad en el ritmo cardíaco
         """
         if len(self.rr_intervals) == 0:
-            # fallback: asume 60 lpm 1 seg
+            # Valor por defecto para 60 LPM (1 latido por segundo)
             rr_value = 1.0
         else:
             if use_percentile:
+                # Usar percentil 95 para ser conservador con latidos largos
                 rr_value = np.percentile(self.rr_intervals, 95)
             else:
                 rr_value = np.mean(self.rr_intervals)
         
-        return rr_value * n_cycles * safety
+        return rr_value * n_beats * safety
     
+    def beat_in_interval(self, window:float):
+        """
+        Estima el número de latidos esperados en un intervalo de tiempo.
+        
+        Args:
+            window: Duración del intervalo en segundos
+            
+        Returns:
+            int: Número estimado de latidos cardíacos
+        """
+        if self.heart_rate is None:
+            self._compute_heart_rate()
+
+        if self.heart_rate == 0.0:
+            return 0
+        
+        return int((self.heart_rate / 60.0) * window)
 
     def _get_rr_intervals(self, return_times: bool = True):
         """
