@@ -553,6 +553,289 @@ class ECG(RawSignal):
             ax.text(0.02, 0.98, txt, transform=ax.transAxes, va='top')
         return result
 
+    def dt_waves(self, channels:dict=None, low_freq:float=0.5, high_freq:float=40.0, order:int=5,
+                 delineate_method:str='dwt', plot_waves:bool=True, tmin:float=0.0, tmax:float=10.0):
+        """
+        Detección y delineado de ondas P/Q/R/S/T usando NeuroKit2 en una ventana temporal.
+
+        Detecta picos R y delinea las ondas (P, Q, R, S, T) por canal en la ventana
+        absoluta [tmin, tmax] (segundos desde el inicio del registro original). Devuelve
+        un diccionario con resultados por canal que incluye índices locales, tiempos
+        absolutos (s) y la señal filtrada utilizada para la delineación.
+
+        Args:
+            channels : iterable[int] | dict | None, optional
+                Canales a procesar. Si es None se procesan todos los canales en `self.data`.
+                (Aunque la firma actual use `dict` acepta también listas/tuplas/iterables.)
+            low_freq : float, optional
+                Corte inferior (Hz) para el filtrado Butterworth previo. Si es None no
+                se aplica pasa-altos. Por defecto 0.5 Hz.
+            high_freq : float, optional
+                Corte superior (Hz) para el filtrado Butterworth previo. Si es None no
+                se aplica pasa-bajos. Por defecto 40.0 Hz.
+            order : int, optional
+                Orden del filtro Butterworth. Por defecto 5.
+            delineate_method : str, optional
+                Método a pasar a `nk.ecg_delineate` (p. ej. 'dwt'). Por defecto 'dwt'.
+            plot_waves : bool, optional
+                Si True, genera una figura por canal mostrando la señal (en tiempo absoluto)
+                y los marcadores de P/Q/R/S/T hallados. Por defecto True.
+            tmin : float, optional
+                Tiempo inicial ABSOLUTO en segundos (desde el inicio del registro original).
+                Por defecto 0.0.
+            tmax : float, optional
+                Tiempo final ABSOLUTO en segundos. Si (tmax - tmin) es menor que una ventana
+                mínima interna (min_window_seconds = 4.0 s), la función extiende tmax para
+                garantizar la ventana mínima. Por defecto 10.0.
+
+        Returns:
+            dict:
+                Diccionario con una entrada por canal (clave = índice del canal) cuyo valor
+                es otro diccionario con las siguientes claves principales:
+
+                - 'r_peaks' : np.ndarray
+                    Índices LOCALES (enteros) de picos R respecto a la `sig_clean` pasada a NeuroKit2.
+                - 'r_peaks_global' : np.ndarray
+                    Índices GLOBALES (muestras en la referencia del registro original): 
+                    r_peaks_local + t_min_samps + first_samp.
+                - 'P_peaks', 'Q_peaks', 'S_peaks', 'T_peaks' : np.ndarray
+                    Índices LOCALES (enteros) detectados por `nk.ecg_delineate` (filtrados de NaN).
+                - 'P_onsets','P_offsets',... (y similares) : np.ndarray
+                    Índices LOCALES de onsets/offsets para cada onda (enteros).
+                - 'times' : dict
+                    Sub-diccionario con conversiones a segundos absolutos para cada array (p. ej.
+                    'R_peaks', 'P_onsets', ...). Cada valor es un np.ndarray de tiempos en segundos
+                    obtenido como (index_local + t_min_samps + first_samp) / sfreq.
+                - 'delineate_raw' : dict
+                    Salida "cruda" (normalizada) devuelta por `nk.ecg_delineate` para inspección.
+                - 'filtered_signal' : np.ndarray
+                    Ventana de la señal (1-D) usada para detección/delineado (sig_clean).
+
+        Raises:
+            ValueError:
+                - Si `tmin` está fuera del rango de la señal.
+                - Si, tras el clipping por duración, la ventana resultante queda vacía.
+                - Si los parámetros de frecuencia son inválidos (lo chequea `self.filter`).
+
+        Side effects / notas de estado:
+            - No modifica `self.data`.
+            - La función aplica un filtrado previo (si `self.is_filtered` es False) y luego llama
+            a `nk.ecg_peaks` y `nk.ecg_delineate` sobre la **señal recortada**; por tanto los
+            índices devueltos por NeuroKit2 son **locales** respecto a `sig_clean`.
+
+        Notes:
+            - Convenciones temporales (muy importantes):
+                * `tmin`/`tmax` se interpretan como tiempos ABSOLUTOS desde el inicio del registro.
+                * `t_min_samps = int(tmin * sfreq)` es la muestra global donde empieza la ventana.
+                * `global_offset = t_min_samps + first_samp`.
+                * índice_global = índice_local + global_offset.
+                * tiempo (s) = índice_global / sfreq.
+            - `nk.ecg_delineate` puede devolver NaN o floats; la función normaliza esas salidas
+            eliminando NaN y redondeando a enteros para índices de muestra.
+            - Si la ventana es muy corta (p. ej. < ~4 s) la detección/delineado puede fallar
+            o devolver menos onsets/offsets (P/T pueden no detectarse). Por eso se fuerza una
+            ventana mínima interna (`min_window_seconds = 4.0`).
+            - `r_peaks` en el diccionario resultante **son índices locales**. Usá `r_peaks_global`
+            o `times['R_peaks']` si querés coordenadas absolutas.
+            - La función protege contra índices fuera de rango antes de indexar la señal para
+            evitar errores por latidos parciales en los bordes de la ventana.
+
+        Examples:
+            >>> # Señal mono, tiempo absoluto y first_samp conocido
+            >>> ecg = ECG(data=my_ecg_1d, sfreq=512.0, first_samp=1536)
+            >>> res = ecg.dt_waves(tmin=30.0, tmax=40.0)   # procesa 30–40 s del registro original
+            >>> # r_peaks locales y globales del canal 0
+            >>> print(res[0]['r_peaks'][:10])              # índices locales (0..N-1)
+            >>> print(res[0]['r_peaks_global'][:10])       # índices globales (muestras en el registro)
+            >>> print(res[0]['times']['R_peaks'][:10])     # tiempos absolutos en segundos
+
+            >>> # Si querés plotear pero la ventana original es muy corta, aumentá tmax o usa
+            >>> # padding fuera de esta función para dar más contexto a la delineación.
+        """
+        # Preparo los datos
+        data = np.asarray(self.data)
+
+        if data.ndim == 1:
+            data = data.reshape(1, -1)
+        
+        # Preparo los canales
+        n_channels, n_samples = data.shape
+        if channels is None:
+            channels = list(range(n_channels))
+
+        min_window_seconds = 4.0   # mínimo recomendado
+        # forzar tipo float y coherencia
+        tmin = float(tmin)
+        tmax = float(tmax)
+
+        if (tmax - tmin) < min_window_seconds:
+            tmax = tmin + min_window_seconds
+
+        t_min_samps = int(max(0, np.floor(tmin * self.sfreq)))
+        t_max_samps = int(np.ceil(tmax * self.sfreq))
+
+        if t_min_samps >= n_samples:
+            raise ValueError("tmin está fuera del rango de la señal.")
+        if t_max_samps <= t_min_samps:
+            raise ValueError("Ventana incorrecta tras clipping por duración de la señal.")
+
+        results = {}
+        
+        for ch in channels:
+            if not self.is_filtered:
+                sig_clean = self.filter(low_freq=low_freq, high_freq=high_freq, order=order).data[ch, t_min_samps:t_max_samps]
+            else:
+                sig_clean = data[ch, t_min_samps:t_max_samps]
+
+            peaks, info_peaks = nk.ecg_peaks(sig_clean, sampling_rate=self.sfreq)
+
+            if 'ECG_R_Peaks' in info_peaks:
+                r_peaks = np.asarray(info_peaks['ECG_R_Peaks']).astype(int)
+
+            elif 'ECG_R_Peaks' in peaks:
+                mask = np.asarray(peaks['ECG_R_Peaks']).ravel()
+                r_peaks = np.where(mask!=0)[0].astype(int)
+            else:
+                r_peaks = np.array([], dtype=int)
+
+            # Delineado de ondas
+            delineate_out_raw = {}
+            if r_peaks.size > 0:
+                try:
+                    delineate_out_raw = nk.ecg_delineate(sig_clean, rpeaks=r_peaks, sampling_rate=self.sfreq, method=delineate_method)
+                except Exception as e:
+                    logging.info(f"La delineación falló en {ch}: {e}")
+                    delineate_out_raw = {}
+
+            delineate_out = {}
+            if isinstance(delineate_out_raw, dict):
+                delineate_out = delineate_out_raw
+            elif isinstance(delineate_out_raw, (tuple, list)) and len(delineate_out_raw) > 0:
+                # Buscar el primer elemento que sea dict
+                for el in delineate_out_raw:
+                    if isinstance(el, dict):
+                        delineate_out = el
+                        break
+                # Si no encontramos dict, intentar si el segundo elemento es el dict (común caso)
+                if not delineate_out and len(delineate_out_raw) > 1 and isinstance(delineate_out_raw[1], dict):
+                    delineate_out = delineate_out_raw[1]
+            # si sigue vacío, delineate_out quedará {} y _getarr devolverá arrays vacío
+
+            # Función interna para normalizado de keys para NeuroKit2
+            def _getarr(d, key):
+                """
+                Normaliza la salida de nk.ecg_delineate para devolver índices enteros locales
+                (respecto a la señal pasada a nk.ecg_delineate). Elimina NaN y redondea.
+                """
+                if not isinstance(d, dict):
+                    return np.array([], dtype=int)
+
+                val = d.get(key, np.array([], dtype=int))
+
+                # Si es DataFrame/Series convertimos a numpy
+                try:
+                    import pandas as _pd
+                    if isinstance(val, (_pd.Series, _pd.DataFrame)):
+                        val = val.values.ravel()
+                except Exception:
+                    pass
+
+                arr = np.asarray(val, dtype=float)  # puede contener NaN o floats (fracciones de muestra)
+                if arr.size == 0:
+                    return np.array([], dtype=int)
+
+                # Filtrar valores finitos y convertir a índices de muestra enteros
+                finite_mask = np.isfinite(arr)
+                if not finite_mask.any():
+                    return np.array([], dtype=int)
+
+                arr_finite = arr[finite_mask]
+                arr_idx = np.round(arr_finite).astype(int)
+                return arr_idx
+            
+            P_peaks = _getarr(delineate_out, 'ECG_P_Peaks')
+            P_onsets = _getarr(delineate_out, 'ECG_P_Onsets')
+            P_offsets = _getarr(delineate_out, 'ECG_P_Offsets')
+
+            Q_peaks = _getarr(delineate_out, 'ECG_Q_Peaks')
+            Q_onsets = _getarr(delineate_out, 'ECG_Q_Onsets')
+            Q_offsets = _getarr(delineate_out, 'ECG_Q_Offsets')
+
+            R_peaks = r_peaks
+            R_onsets = _getarr(delineate_out, 'ECG_R_Onsets')
+            R_offsets = _getarr(delineate_out, 'ECG_R_Offsets')
+
+            S_peaks = _getarr(delineate_out, 'ECG_S_Peaks')
+
+            T_peaks = _getarr(delineate_out, 'ECG_T_Peaks')
+            T_onsets = _getarr(delineate_out, 'ECG_T_Onsets')
+            T_offsets = _getarr(delineate_out, 'ECG_T_Offsets')    
+
+            # offset global en muestras para la ventana actual
+            global_offset = int(t_min_samps) + int(self.first_samp)
+
+            r_global = (R_peaks.astype(int) + global_offset) if R_peaks.size else np.array([], dtype=int)
+
+            def _to_times(arr):
+                if arr is None or arr.size == 0:
+                    return np.array([], dtype=float)
+                # arr está en índices locales respecto a sig_clean -> pasar a global y a segundos
+                arr_local = np.asarray(arr, dtype=int)
+                arr_global = arr_local + global_offset
+                return arr_global / float(self.sfreq)
+
+            times = {
+                'P_peaks': _to_times(P_peaks),
+                'P_onsets': _to_times(P_onsets),
+                'P_offsets': _to_times(P_offsets),
+                'Q_peaks': _to_times(Q_peaks),
+                'Q_onsets': _to_times(Q_onsets),
+                'Q_offsets': _to_times(Q_offsets),
+                'R_peaks': _to_times(R_peaks),
+                'R_onsets': _to_times(R_onsets),
+                'R_offsets': _to_times(R_offsets),
+                'S_peaks': _to_times(S_peaks),
+                'T_peaks': _to_times(T_peaks),
+                'T_onsets': _to_times(T_onsets),
+                'T_offsets': _to_times(T_offsets),
+            }
+
+            results[ch] = {
+                'r_peaks': R_peaks,
+                'r_peaks_global': r_global,
+                'P_peaks': P_peaks, 'P_onsets': P_onsets, 'P_offsets': P_offsets,
+                'Q_peaks': Q_peaks, 'Q_onsets': Q_onsets, 'Q_offsets': Q_offsets,
+                'R_onsets': R_onsets, 'R_offsets': R_offsets,
+                'S_peaks': S_peaks,
+                'T_peaks': T_peaks, 'T_onsets': T_onsets, 'T_offsets': T_offsets,
+                'times': times,
+                'delineate_raw': delineate_out,  # raw output if querés investigar
+                'filtered_signal': sig_clean
+            }
+
+            if plot_waves:
+                fig, ax = plt.subplots(figsize=(10, 6))
+
+                # x axis en segundos alineada con los tiempos globales
+                x_axis = (np.arange(sig_clean.size) + global_offset) / float(self.sfreq)
+                ax.plot(x_axis, sig_clean, label=f'ECG Ch: {ch}', color="#000000", alpha=0.8, zorder=1)
+
+                # marcar ondas: convertir índices locales -> globales usando global_offset
+                for key, arr in [('R', R_peaks), ('P', P_peaks), ('Q', Q_peaks), ('S', S_peaks), ('T', T_peaks)]:
+                    if arr is not None and arr.size > 0:
+                        arr_global = (arr.astype(int) + global_offset)
+                        # proteger índices fuera de rango
+                        valid_mask = (arr >= 0) & (arr < sig_clean.size)
+                        ax.scatter(arr_global[valid_mask] / float(self.sfreq), sig_clean[arr[valid_mask]],
+                                label=f'Picos {key}', s=30, zorder=3)
+
+                ax.legend()
+                ax.set_xlabel('Time (s)')
+                ax.grid(True, linestyle='--', alpha=0.5)
+                plt.show()
+        
+        return results
+
     def freq_time(self):
         pass
 
@@ -717,3 +1000,19 @@ class ECG(RawSignal):
         
         return segments, time_vector
 
+    def _min_tmax(self, rr_intervals, n_cycles:int=3, safety:float=1.2):
+        """
+        Estima el mínimo tmax para pasar a ecg_delineate de modo
+        que haya suficientes ciclos completos.
+
+        rr_intervals: array de intervalos RR en segundos
+        n_cycles: cantidad de latidos mínimos a cubrir
+        safety: factor de seguridad (>1)
+        """
+        if len(rr_intervals) == 0:
+            # fallback: asume 60 lpm
+            rr_mean = 1.0
+        else:
+            rr_mean = np.mean(rr_intervals)
+        return rr_mean * n_cycles * safety
+    
