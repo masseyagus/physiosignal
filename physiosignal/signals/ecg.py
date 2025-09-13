@@ -164,6 +164,13 @@ class ECG(RawSignal):
         except Exception:
             self.r_peaks_global = None
 
+        # Calculo y almaceno los intervalos RR y sus tiempos ABSOLUTOS
+        if len(self.r_peaks) >= 2:
+            self.rr_intervals , self.rr_times = self._get_rr_intervals(return_times=True)
+        else:
+            self.rr_intervals = np.array([], dtype=float)
+            self.rr_times = np.array([], dtype=float)
+
         self._last_channel = channel
 
         return peaks, info_peaks
@@ -463,7 +470,7 @@ class ECG(RawSignal):
         if self.r_peaks is None or len(self.r_peaks) < 3:
             raise ValueError("Necesitas al menos 3 picos R para Poincaré. Ejecutá peak_detection().")
 
-        rr, times = self._get_rr_intervals(return_times=True)  # rr: N-1, times: N-1 (time of second peak)
+        rr, times = self.rr_intervals, self.rr_times
         rr_n  = rr[:-1]
         rr_n1 = rr[1:]
         times_pairs = times[:-1]  # tiempo asociado a cada punto (opcional)
@@ -842,6 +849,31 @@ class ECG(RawSignal):
     def freq_time(self):
         pass
 
+    def min_tmax(self, n_cycles:int=3, safety:float=1.2, use_percentile:bool=True) -> float:
+        """
+        Estima un tmax adecuado basado en los intervalos RR para garantizar 
+        que se capturen suficientes latidos para análisis.
+        
+        Args:
+            n_beats: Número de latidos que se desean capturar
+            use_percentile: Si True, usa el percentil 95 para cubrir latidos más largos
+            safety: Factor de seguridad para asegurar suficiente margen
+        
+        Returns:
+            float: Tiempo estimado en segundos para una ventana adecuada
+        """
+        if len(self.rr_intervals) == 0:
+            # fallback: asume 60 lpm 1 seg
+            rr_value = 1.0
+        else:
+            if use_percentile:
+                rr_value = np.percentile(self.rr_intervals, 95)
+            else:
+                rr_value = np.mean(self.rr_intervals)
+        
+        return rr_value * n_cycles * safety
+    
+
     def _get_rr_intervals(self, return_times: bool = True):
         """
         Devuelve los intervalos R-R (segundos) y — opcionalmente — los tiempos absolutos (s)
@@ -920,14 +952,11 @@ class ECG(RawSignal):
             - Este método usa `_get_rr_intervals()` (que incorpora `first_samp`) para calcular
             la media de los intervalos RR en segundos y convertir a BPM.
         """
-        rr, _ = self._get_rr_intervals(return_times=True)
-
-        if rr.size < 1:
+        if hasattr(self, 'rr_intervals') and len(self.rr_intervals) > 0:
+            self.heart_rate = 60.0 / np.mean(self.rr_intervals)
+        else:
             self.heart_rate = 0.0
-
-            return self.heart_rate
-
-        self.heart_rate = 60.0 / np.mean(rr)
+        
         return self.heart_rate
     
     def _extract_segment(self, before:float=0.2, after:float=0.5, return_peak_times:bool=False):
@@ -1003,19 +1032,4 @@ class ECG(RawSignal):
         
         return segments, time_vector
 
-    def _min_tmax(self, rr_intervals, n_cycles:int=3, safety:float=1.2):
-        """
-        Estima el mínimo tmax para pasar a ecg_delineate de modo
-        que haya suficientes ciclos completos.
 
-        rr_intervals: array de intervalos RR en segundos
-        n_cycles: cantidad de latidos mínimos a cubrir
-        safety: factor de seguridad (>1)
-        """
-        if len(rr_intervals) == 0:
-            # fallback: asume 60 lpm
-            rr_mean = 1.0
-        else:
-            rr_mean = np.mean(rr_intervals)
-        return rr_mean * n_cycles * safety
-    
