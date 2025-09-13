@@ -482,7 +482,7 @@ class ECG(RawSignal):
         SD1_global = np.std(diff) / np.sqrt(2)
         SD2_global = np.std(sum_) / np.sqrt(2)
 
-        fig, ax = plt.subplots(figsize=(8, 8))
+        fig, ax = plt.subplots(figsize=(9, 8))
         cmap = None
         per_event = {}
 
@@ -850,24 +850,23 @@ class ECG(RawSignal):
     def freq_time(self):
         pass
 
-    def signal_quality(self):
+    def basic_signal_quality(self):
         """
-        Evalúa la calidad de la señal ECG basándose en métricas de detección de picos R.
+        Evalúa RÁPIDAMENTE la calidad de la señal ECG basándose en métricas básicas de detección de picos R.
         
-        La calidad se determina considerando:
-        - Cantidad de picos R detectados: Más picos indican mayor confiabilidad
-        - Variabilidad de los intervalos RR: Menor variabilidad indica señal más estable
+        Esta función proporciona una evaluación rápida y simple, ideal para una verificación inicial
+        o para sistemas con recursos limitados. Para un análisis más completo, usar signal_quality().
         
         Returns:
-            dict: Diccionario con métricas de calidad:
+            dict: Diccionario con métricas básicas de calidad:
                 - 'calidad' (str): Evaluación cualitativa: "mala", "media", "buena", "variable"
                 - 'confianza' (float): Valor entre 0.0-1.0 basado en número de picos detectados
                 - 'n_picos' (int): Número total de picos R detectados
                 - 'coef_var' (float): Coeficiente de variación de los intervalos RR
-        
+            
         Notes:
             - Calidad "mala": Menos de 2 picos R detectados
-            - Calidad "media": 2-4 picos R detectados
+            - Calidad "media": 2-4 picos R detectados  
             - Calidad "buena": 5+ picos R con baja variabilidad (CV < 0.3)
             - Calidad "variable": 5+ picos R con alta variabilidad (CV ≥ 0.3)
             - La confianza se calcula como min(1.0, n_picos/10.0)
@@ -889,6 +888,99 @@ class ECG(RawSignal):
 
         return {'calidad': calidad, 'confianza': confianza, 
                 'n_picos': len(self.r_peaks), 'coef_var': round(cv, 3)}
+
+    def signal_quality(self, method:str="basic"):
+        """
+        Evalúa la calidad de la señal ECG para análisis de integración con EEG.
+        
+        Esta función proporciona una evaluación comprehensiva de la calidad de la señal ECG,
+        enfocándose en métricas relevantes para estudios de potenciales evocados (P300) y
+        integración con datos EEG. Ofrece dos modos de evaluación: simple (por defecto) y
+        avanzado utilizando BioSPPy cuando está disponible.
+
+        Args:
+            method (str, optional): Método de evaluación. Opciones:
+                - "simple": Método interno con métricas básicas.
+                - "biosppy": Método avanzado que utiliza BioSPPy para análisis adicional
+                - "basic": Evaluación rápida y simple (equivalente a basic_signal_quality()). Por defecto.
+
+        Returns:
+            dict: Diccionario con métricas de calidad que incluye:
+                - quality_score (float): Puntaje general de calidad (0-100)
+                - quality_label (str): Evaluación cualitativa ("excelente", "buena", "acceptable", "mala")
+                - baseline_stability (float): Estabilidad de línea base (0-1)
+                - peak_detection_confidence (float): Confianza en detección de picos R (0-1)
+                - artifact_contamination (float): Nivel de contaminación por artefactos (0-1)
+                - temporal_consistency (float): Consistencia temporal para sincronización (0-1)
+                - biosppy_quality (dict, opcional): Métricas adicionales de BioSPPy (solo method="biosppy")
+                - biosppy_available (bool, opcional): Indica si BioSPPy estaba disponible (solo method="biosppy")
+
+        Notes:
+            - Para estudios P300, la estabilidad de línea base y la detección confiable de picos R son críticas
+            - El método "biosppy" proporciona análisis adicional pero requiere la librería BioSPPy instalada
+            - Las métricas están normalizadas para facilitar la interpretación (0 = peor, 1 = mejor)
+        """
+        if method == "basic":
+            return self.basic_signal_quality()
+    
+        if self.data.ndim == 2:
+            ecg_signal = self.data[getattr(self, '_last_channel', 0)]
+        else:
+            ecg_signal = self.data
+
+        # Métricas básicas de calidad
+        metrics = {
+            'baseline_stability': self._calculate_baseline_stability(ecg_signal),
+            'peak_detection_confidence': self._calculate_peak_confidence(),
+            'artifact_contamination': self._calculate_artifact_contamination(ecg_signal),
+            'temporal_consistency': self._calculate_temporal_consistency()
+        }
+
+        # Calculamos puntaje general (ponderado según importancia para EEG)
+        weights = {
+            'baseline_stability': 0.3,       # Importante para no enmascarar potenciales evocados
+            'peak_detection_confidence': 0.4, # Crítico para sincronización temporal
+            'artifact_contamination': 0.2,    # Evitar correlaciones espurias
+            'temporal_consistency': 0.1       # Consistencia en intervalos RR
+        }
+
+        quality_score = sum(metrics[metric] * weights[metric] for metric in metrics) * 100
+    
+        # Asignar etiqueta cualitativa
+        if quality_score >= 85:
+            quality_label = "excelente"
+        elif quality_score >= 70:
+            quality_label = "buena"
+        elif quality_score >= 50:
+            quality_label = "aceptable"
+        else:
+            quality_label = "mala"
+
+        # Integrar BioSPPy si está disponible y se solicita
+        if method == "biosppy":
+            try:
+                biosppy_result = self._get_biosppy_quality(ecg_signal)[0]
+                if hasattr(biosppy_result, 'Level3'):
+                    biosppy_score = float(biosppy_result.Level3)
+                else:
+                    biosppy_score = float(biosppy_result)
+                
+                metrics['biosppy_quality'] = biosppy_score
+                
+                # Integrar el score de BioSPPy en el score general (50/50)
+                quality_score = (quality_score + biosppy_score * 100) / 2
+                
+            except ImportError:
+                metrics['biosppy_available'] = False
+            except Exception as e:
+                print(f"Error en evaluación BioSPPy: {e}")
+                metrics['biosppy_error'] = str(e)
+        
+        return {
+            'quality_score': round(float(quality_score), 2),
+            'quality_label': quality_label,
+            **metrics
+        }
 
     def min_tmax(self, n_beats:int=3, safety:float=1.2, use_percentile:bool=True) -> float:
         """
@@ -1111,3 +1203,196 @@ class ECG(RawSignal):
         
         return self.heart_rate
     
+    def _calculate_baseline_stability(self, signal):
+        """
+        Evalúa la estabilidad de la línea base de la señal ECG.
+        
+        Calcula la deriva de la línea base aplicando un filtro pasa-bajos y midiendo
+        la variación máxima de la señal filtrada. Una línea base estable es esencial
+        para análisis de potenciales evocados donde las derivas pueden enmascarar
+        componentes de interés.
+
+        Args:
+            signal (np.ndarray): Señal ECG para analizar
+
+        Returns:
+            float: Puntaje de estabilidad normalizado (0-1), donde 1 indica máxima estabilidad
+
+        Notes:
+            - Utiliza un filtro Butterworth de 2º orden con frecuencia de corte de 1 Hz
+            - Considera una deriva máxima aceptable de 100 µV para normalización
+            - Valores cercanos a 1 indican excelente estabilidad de línea base
+        """
+        from scipy import signal as sp_signal
+
+        # Filtro pasa-bajo para aislar la linea base
+        b, a = sp_signal.butter(2, 0.5 / (self.sfreq / 2), btype='low')
+        baseline = sp_signal.filtfilt(b, a, signal)
+
+        # Usar percentiles para evitar influencia de outliers
+        baseline_range = np.percentile(baseline, 95) - np.percentile(baseline, 5)
+
+        # Normalizo
+        max_acceptable_drift = 200  # µV, valor típico aceptable
+        stability = max(0, 1 - (baseline_range / max_acceptable_drift))
+        
+        return round(stability, 3)
+    
+    def _calculate_peak_confidence(self):
+        """
+        Evalúa la confianza en la detección de picos R basándose en la consistencia
+        de los intervalos RR.
+
+        Calcula el coeficiente de variación de los intervalos RR para determinar
+        qué tan consistentes son los latidos detectados. Una baja variación indica
+        detección confiable, mientras que alta variación puede indicar detecciones
+        erróneas o arritmias.
+
+        Returns:
+            float: Puntaje de confianza normalizado (0-1), donde 1 indica máxima confianza
+
+        Notes:
+            - Requiere al menos 5 picos R detectados para ser efectivo
+            - Utiliza el coeficiente de variación (CV) de los intervalos RR
+            - Aplica una transformación no lineal para convertir CV a puntaje de confianza
+        """
+
+        if self.r_peaks is None or len(self.r_peaks) < 5:
+            return 0.0
+        
+        rr_intervals = np.diff(self.r_peaks) / self.sfreq
+        cv = np.std(rr_intervals) / np.mean(rr_intervals)
+
+        return round(1.0 / (1.0 + (3 * cv)), 3)
+    
+    def _calculate_artifact_contamination(self, signal):
+        """
+        Evalúa el nivel de contaminación por artefactos en la señal ECG.
+        
+        Analiza el contenido de alta frecuencia (20-45 Hz) de la señal para detectar
+        artefactos de movimiento que podrían correlacionarse erróneamente con eventos
+        EEG en estudios de potenciales evocados.
+
+        Args:
+            signal (np.ndarray): Señal ECG para analizar
+
+        Returns:
+            float: Puntaje de contaminación normalizado (0-1), donde 1 indica mínima contaminación
+
+        Notes:
+            - Utiliza un filtro pasa-banda (20-45 Hz) para aislar componentes de artefactos
+            - Compara la energía en la banda de artefactos con la energía total de la señal
+            - Valores cercanos a 1 indican señal limpia con mínimos artefactos
+        """
+        from scipy import signal as sp_signal
+
+        # Detectamos artefactos de movimiento (alta freq)
+        b, a = sp_signal.butter(3, [20, 45], btype='bandpass', fs=self.sfreq)
+        filtered = sp_signal.filtfilt(b, a, signal)
+
+        # Identifico segmentos de alta energía en banda de artefactos
+        artifact_energy = np.mean(filtered**2)
+        baseline_energy = np.mean(signal**2)
+
+        artifact_ratio = artifact_energy / (baseline_energy + 1e-10)
+
+        return round(1.0 / (1.0 + artifact_ratio), 3)  # Normalizar a 0-1
+    
+    def _calculate_temporal_consistency(self):
+        """
+        Evalúa la consistencia temporal de los latidos para sincronización precisa.
+        
+        Estima la proporción de latidos potencialmente missing basándose en outliers
+        en los intervalos RR. Esta métrica es crucial para garantizar una adecuada
+        sincronización temporal en estudios que integran ECG y EEG.
+
+        Returns:
+            float: Puntaje de consistencia normalizado (0-1), donde 1 indica máxima consistencia
+
+        Notes:
+            - Utiliza la desviación absoluta mediana (MAD) para detectar outliers
+            - Considera intervalos RR que exceden 2.5 veces la MAD como potencialmente missing
+            - Requiere al menos 3 picos R detectados para ser efectivo
+        """
+        if self.r_peaks is None or len(self.r_peaks) < 3:
+            return 0.0
+        
+        rr_intervals = np.diff(self.r_peaks) / self.sfreq
+        missing_beats = self._estimate_missing_beats(rr_intervals)
+
+        # Calculo porcentaje de latidos probablemente perdidos
+        excepted_beats = len(self.r_peaks) + missing_beats
+        if excepted_beats == 0:
+            return 0.0
+        
+        consistency = 1 - (missing_beats / excepted_beats)
+
+        return round(max(0, consistency), 3)
+
+    def _estimate_missing_beats(self, rr_intervals):
+        """
+        Estima el número de latidos potencialmente missing basándose en outliers
+        estadísticos en la distribución de intervalos RR.
+
+        Args:
+            rr_intervals (np.ndarray): Array de intervalos RR en segundos
+
+        Returns:
+            float: Número estimado de latidos missing, redondeado a 3 decimales
+
+        Notes:
+            - Utiliza el criterio de outliers basado en desviación absoluta mediana (MAD)
+            - Considera outliers aquellos intervalos que exceden 2.5 veces la MAD
+            - Este método es robusto frente a distribuciones no normales de intervalos RR
+        """
+        if len(rr_intervals) < 2:
+            return 0
+
+        median_rr = np.median(rr_intervals)
+        mad = np.median(np.abs(rr_intervals - median_rr))  # Desviación absoluta mediana
+
+        # Contamos los intervalos que exceden el umbral
+        threshold = median_rr + 2.5 * mad
+        missing_estimates = np.sum(rr_intervals > threshold)
+
+        return round(missing_estimates, 3)
+    
+    def _get_biosppy_quality(self, signal):
+        """
+        Utiliza las funciones de calidad de señal ECG de BioSPPy para evaluación avanzada.
+        
+        Cuando está disponible, utiliza el método 'Level3' de BioSPPy que implementa
+        un algoritmo de evaluación de calidad de señal ECG basado en múltiples criterios:
+        
+        1. Análisis espectral: Evalúa la relación entre energía en bandas características
+        del ECG y bandas de ruido
+        2. Consistencia morfológica: Analiza la similaridad entre complejos QRS consecutivos
+        3. Detección de artefactos: Identifica segmentos con morfología anormal o amplitudes
+        extremas mediante análisis de templates
+        4. Análisis de intervalos RR: Evalúa la consistencia y patrón de los intervalos
+        entre latidos
+
+        Args:
+            signal (np.ndarray): Señal ECG para analizar
+
+        Returns:
+            float: Puntaje de calidad de BioSPPy (0-1), donde 1 indica excelente calidad
+
+        Raises:
+            ImportError: Si BioSPPy no está disponible en el entorno
+
+        Notes:
+            - El método 'Level3' de BioSPPy combina múltiples métricas en un puntaje único
+            - Este método es computacionalmente más intensivo pero proporciona evaluación más robusta
+            - Devuelve 0.0 si ocurre cualquier error durante el procesamiento
+        """
+        try:
+            import biosppy.quality as bq
+            return bq.quality_ecg(segment=signal, sampling_rate=self.sfreq, methods=['Level3'])
+
+        except ImportError:
+            raise ImportError("BioSPPy no disponible")
+        
+        except Exception as e:
+            print(f"Error usando BioSPPy quality: {e}")
+            return 0.0
