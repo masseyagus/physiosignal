@@ -576,7 +576,10 @@ class ECG(RawSignal):
             order : int, optional
                 Orden del filtro Butterworth. Por defecto 5.
             delineate_method : str, optional
-                Método a pasar a `nk.ecg_delineate` (p. ej. 'dwt'). Por defecto 'dwt'.
+                Método de delineación de ondas. Opciones disponibles (NeuroKit2):
+                    - "dwt": Discrete Wavelet Transform (default, robusto).
+                    - "peak": detección simple basada en picos.
+                    - "cwt": Continuous Wavelet Transform.
             plot_waves : bool, optional
                 Si True, genera una figura por canal mostrando la señal (en tiempo absoluto)
                 y los marcadores de P/Q/R/S/T hallados. Por defecto True.
