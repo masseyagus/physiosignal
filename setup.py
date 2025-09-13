@@ -14,8 +14,7 @@ setup(
         "pyqtgraph>=0.12",
         "PyQt5>=5.15",
         "mne>=1.9",
-        "neurokit2>=0.2.12",
-        "hrv-analysis>=1.0.5"
+        "neurokit2>=0.2.12"
     ],
     python_requires=">=3.10"
 )

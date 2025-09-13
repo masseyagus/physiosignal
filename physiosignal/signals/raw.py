@@ -134,6 +134,8 @@ class RawSignal:
         
         self.sfreq = self.info.sfreq if sfreq is None else float(sfreq)
 
+        self.is_filtered = False # Se marca True al filtrar con filter()
+
         # Configuración inicial del logger
         log_config(see_log)  
         self._logger = logging.getLogger(__name__) # __name__ toma el nombre del submódulo
@@ -419,7 +421,7 @@ class RawSignal:
         return df
 
     def filter(self, low_freq:float = 1, high_freq:float = 25, order:int = 4, 
-               notch_freq:float = 50.0, q:int = 30) -> RawSignal:
+               notch_freq:float = 50.0, q:int =30, inplace:bool=False) -> RawSignal:
         """
         Aplica filtrado Butterworth a la señal.
         
@@ -495,9 +497,18 @@ class RawSignal:
         filtered_signal = signal.filtfilt(b, a, processed_signal, axis=-1)
         smoothed_data = signal.savgol_filter(filtered_signal, window_length=11, polyorder=3)
 
+        if inplace:
+            self.data = smoothed_data
+            self.is_filtered = True
+            return self
+        
         # Crear nueva instancia con la señal filtrada
-        return RawSignal(data=smoothed_data, sfreq=self.sfreq, info=self.info, 
-                        anotaciones=self.anotaciones, first_samp=self.first_samp)
+        filtered_signal = RawSignal(data=smoothed_data, sfreq=self.sfreq, info=self.info, 
+                                    anotaciones=self.anotaciones, first_samp=self.first_samp)
+        
+        filtered_signal.is_filtered = True
+
+        return filtered_signal
 
     def pick(self, picks) -> RawSignal:
         """
