@@ -13,17 +13,16 @@ import matplotlib.pyplot as plt
 class ECG(RawSignal):
     """
     Representa una señal de Electrocardiografía (ECG) con utilidades para
-    detección de picos R, cálculo de frecuencia cardiaca y visualización.
+    detección de picos R, cálculo de frecuencia cardiaca, evaluación de calidad
+    de señal y visualizaciones avanzadas.
 
     Key Features:
-        - Detección de picos R mediante NeuroKit2 (`nk.ecg_peaks`) — se usa únicamente como detector.
-        - Almacenamiento de resultados de detección en `self.peaks`, `self.info_peaks` y `self.r_peaks`.
-        - `r_peaks` contiene índices **locales** (0..N-1) relativos al array procesado.
-        - `r_peaks_global` contiene los índices en la referencia del registro original
-          (local + `first_samp`) y se actualiza tras la detección de picos.
-        - Alineación con anotaciones externas mediante `first_samp` (para convertir índices locales -> globales).
-        - Métodos para obtener RR y HR con tiempos absolutos (útiles para agrupar por eventos).
-        - Visualización: plot de picos R, segmentación de latidos, Poincaré con SD1/SD2.
+        - Detección de picos R mediante NeuroKit2 (`nk.ecg_peaks`)
+        - Cálculo de intervalos RR y frecuencia cardíaca
+        - Evaluación de calidad de señal basada en métricas de detección
+        - Delineado de ondas P, Q, R, S, T
+        - Visualización: plot de picos R, segmentación de latidos, Poincaré con SD1/SD2
+        - Estimación automática de ventanas temporales óptimas para análisis
     
     Attributes:
         data : np.ndarray
@@ -36,24 +35,26 @@ class ECG(RawSignal):
             Anotaciones externas (onset en segundos absolutos, duration en segundos, description).
         first_samp : int
             Offset en muestras del primer dato de `self.data` respecto al registro original.
-            **IMPORTANTE:** todas las conversiones a tiempo absoluto usan `t = (r_peak + first_samp) / sfreq`.
         peaks : dict-like | None
-            Resultado retornado por `nk.ecg_peaks` (puede incluir máscara binaria por muestra).
+            Resultado retornado por `nk.ecg_peaks`.
         info_peaks : dict-like | None
-            Diccionario de info devuelto por `nk.ecg_peaks` (puede contener 'ECG_R_Peaks' con índices).
+            Diccionario de info devuelto por `nk.ecg_peaks`.
         r_peaks : np.ndarray | None
-            Índices locales (dtype=int, 1D) de picos R detectados; array vacío si no hay picos.
+            Índices locales de picos R detectados.
         r_peaks_global : np.ndarray | None
-            Índices de picos en coordenada **global** (local + first_samp). Se asigna tras `peak_detection`.
+            Índices de picos en coordenada global (local + first_samp).
         heart_rate : float | None
-            Frecuencia cardiaca estimada (BPM). Inicialmente None; queda para ser poblada por `find_heart_rate()` / `_compute_heart_rate()`.
+            Frecuencia cardiaca estimada (BPM).
+        rr_intervals : np.ndarray | None
+            Intervalos RR en segundos, calculados durante la detección de picos.
+        rr_times : np.ndarray | None
+            Tiempos absolutos de los intervalos RR.
 
     Notes:
-        - Esta clase **no** hace preprocesado automático antes de `nk.ecg_peaks`. Debes preprocesar la señal
-          usando los métodos de la clase RawSignal cuando sea necesario.
-        - `first_samp` se interpreta como número de muestras de offset; convertílo a `int`.
-        - Para análisis por evento (ej. agrupar HR o colorear Poincaré por anotación) usá los tiempos
-          devueltos por `_get_rr_intervals(return_times=True)` o `_get_instantaneous_hr()`.
+        - El preprocesamiento debe hacerse usando los métodos de la clase RawSignal.
+        - `first_samp` se interpreta como número de muestras de offset.
+        - Los métodos de calidad de señal ayudan a determinar la confiabilidad de los resultados.
+        - Los métodos de estimación de ventanas proporcionan valores por defecto inteligentes.
     """
 
     def __init__(self, raw:RawSignal=None, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
@@ -166,7 +167,7 @@ class ECG(RawSignal):
 
         # Calculo y almaceno los intervalos RR y sus tiempos ABSOLUTOS
         if len(self.r_peaks) >= 2:
-            self.rr_intervals , self.rr_times = self._get_rr_intervals(return_times=True)
+            self.rr_intervals , self.rr_times = self.get_rr_intervals(return_times=True)
         else:
             self.rr_intervals = np.array([], dtype=float)
             self.rr_times = np.array([], dtype=float)
@@ -350,7 +351,7 @@ class ECG(RawSignal):
 
         Notes:
             - Este método depende de que `peak_detection()` haya sido ejecutado.
-            - Internamente llama a `_compute_heart_rate()` que usa `_get_rr_intervals()` para
+            - Internamente llama a `_compute_heart_rate()` que usa `get_rr_intervals()` para
             obtener intervalos RR (en segundos) y asegura que los tiempos absolutos están disponibles.
         """
         if self.r_peaks is None:
@@ -378,16 +379,16 @@ class ECG(RawSignal):
                 Se asegura de estar calculada antes de graficar.
 
         Notes:
-            - Este método utiliza `_extract_segment()` para generar latidos individuales y `_get_instantaneous_hr()`
+            - Este método utiliza `extract_segment()` para generar latidos individuales y `get_instantaneous_hr()`
             para obtener HR por latido y sus tiempos absolutos (útiles para análisis por evento).
             - En presencia de `self.anotaciones`, el método puede calcular promedios de HR por evento
-            usando los tiempos absolutos devueltos por `_get_instantaneous_hr()`.
+            usando los tiempos absolutos devueltos por `get_instantaneous_hr()`.
             - Las unidades en los ejes son segundos y µV respectivamente.
         """
         if self.r_peaks is None:
             raise ValueError("Primero debe detectar los picos R usando peak_detection()")
         
-        segments, time_vector = self._extract_segment(before=before, after=after)
+        segments, time_vector = self.extract_segment(before=before, after=after)
         segments_array = np.array(segments)
         
         # Hallo el latido promedio
@@ -450,7 +451,7 @@ class ECG(RawSignal):
                 Si `self.r_peaks` no contiene suficientes picos (necesita al menos 3 picos para un Poincaré).
 
         Side effects:
-            - No modifica `self.r_peaks`. No obstante, usa `_get_rr_intervals(return_times=True)` para
+            - No modifica `self.r_peaks`. No obstante, usa `get_rr_intervals(return_times=True)` para
             asociar puntos a tiempos absolutos con `first_samp`.
 
         Notes:
@@ -558,6 +559,7 @@ class ECG(RawSignal):
             # Añadir texto resumen en la gráfica (puede adaptarse la posición)
             txt = f"SD1={SD1_global:.3f}s  SD2={SD2_global:.3f}s"
             ax.text(0.02, 0.98, txt, transform=ax.transAxes, va='top')
+        
         return result
 
     def dt_waves(self, channels:dict=None, low_freq:float=0.5, high_freq:float=40.0, order:int=5,
@@ -939,7 +941,7 @@ class ECG(RawSignal):
         
         return int((self.heart_rate / 60.0) * window)
 
-    def _get_rr_intervals(self, return_times: bool = True):
+    def get_rr_intervals(self, return_times: bool = True):
         """
         Devuelve los intervalos R-R (segundos) y — opcionalmente — los tiempos absolutos (s)
         asociados a cada intervalo (tiempo del segundo pico del par), usando `first_samp`.
@@ -976,57 +978,10 @@ class ECG(RawSignal):
             return rr, times
 
         return rr
-    
-    def _get_instantaneous_hr(self):
-        """
-        Devuelve la frecuencia instantánea por latido (BPM) y sus tiempos absolutos.
-
-        Returns:
-            hr : np.ndarray (N-1,)
-                Frecuencia instantánea por intervalo en BPM (60 / RR[s]).
-            times : np.ndarray (N-1,)
-                Tiempos absolutos (s) asociados a cada HR (tiempo del segundo pico del par),
-                calculados como (r_peaks[1:] + first_samp) / sfreq.
-
-        Notes:
-            - Usa `_get_rr_intervals(return_times=True)` para garantizar que los tiempos absolutos
-            incorporen `first_samp`.
-            - Si no hay intervalos válidos devuelve arrays vacíos.
-        """
-        rr, times = self._get_rr_intervals(return_times=True)
-
-        if rr.size == 0:
-            return np.array([], dtype=float), np.array([], dtype=float)
         
-        hr = 60.0 / rr
-        return hr, times
-
-    def _compute_heart_rate(self):
+    def extract_segment(self, before:float=0.2, after:float=0.5, return_peak_times:bool=False):
         """
-        Método privado. Calcula la frecuencia cardíaca promedio en BPM a partir de los intervalos RR
-        obtenidos por `_get_rr_intervals()`.
-
-        Returns:
-            float: Frecuencia cardíaca promedio en beats por minuto (BPM).
-
-        Side effects:
-            - self.heart_rate : float
-                Se almacena la frecuencia cardíaca calculada (0.0 si no hay intervalos válidos).
-
-        Notes:
-            - Este método usa `_get_rr_intervals()` (que incorpora `first_samp`) para calcular
-            la media de los intervalos RR en segundos y convertir a BPM.
-        """
-        if hasattr(self, 'rr_intervals') and len(self.rr_intervals) > 0:
-            self.heart_rate = 60.0 / np.mean(self.rr_intervals)
-        else:
-            self.heart_rate = 0.0
-        
-        return self.heart_rate
-    
-    def _extract_segment(self, before:float=0.2, after:float=0.5, return_peak_times:bool=False):
-        """
-        Método privado. Extrae segmentos de ECG centrados en cada pico R (latidos individuales).
+        Extrae segmentos de ECG centrados en cada pico R (latidos individuales).
 
         Args:
             before : float, optional
@@ -1051,6 +1006,18 @@ class ECG(RawSignal):
             estar al inicio o final de la señal.
             - Emplea `self._last_channel` si la señal es multicanal para seleccionar el canal procesado.
             - Los tiempos absolutos devueltos usan `first_samp` para mapear índices locales → globales.
+        
+        Examples:
+            >>> # Extraer latidos para análisis morfológico
+            >>> segments, time_vector = ecg.extract_heartbeats(before=0.3, after=0.7)
+            >>> # Calcular la media y desviación estándar de la morfología
+            >>> mean_beat = np.nanmean(segments, axis=0)
+            >>> std_beat = np.nanstd(segments, axis=0)
+            
+            >>> # Clasificar latidos por similitud morfológica
+            >>> from sklearn.cluster import KMeans
+            >>> kmeans = KMeans(n_clusters=3)
+            >>> clusters = kmeans.fit_predict(np.array(segments))
         """
         samp_before = int(before * self.sfreq)
         samp_after = int(after * self.sfreq)
@@ -1097,4 +1064,50 @@ class ECG(RawSignal):
         
         return segments, time_vector
 
+    def get_instantaneous_hr(self):
+        """
+        Devuelve la frecuencia instantánea por latido (BPM) y sus tiempos absolutos.
 
+        Returns:
+            hr : np.ndarray (N-1,)
+                Frecuencia instantánea por intervalo en BPM (60 / RR[s]).
+            times : np.ndarray (N-1,)
+                Tiempos absolutos (s) asociados a cada HR (tiempo del segundo pico del par),
+                calculados como (r_peaks[1:] + first_samp) / sfreq.
+
+        Notes:
+            - Usa `get_rr_intervals(return_times=True)` para garantizar que los tiempos absolutos
+            incorporen `first_samp`.
+            - Si no hay intervalos válidos devuelve arrays vacíos.
+        """
+        rr, times = self.get_rr_intervals(return_times=True)
+
+        if rr.size == 0:
+            return np.array([], dtype=float), np.array([], dtype=float)
+        
+        hr = 60.0 / rr
+        return hr, times
+
+    def _compute_heart_rate(self):
+        """
+        Método privado. Calcula la frecuencia cardíaca promedio en BPM a partir de los intervalos RR
+        obtenidos por `get_rr_intervals()`.
+
+        Returns:
+            float: Frecuencia cardíaca promedio en beats por minuto (BPM).
+
+        Side effects:
+            - self.heart_rate : float
+                Se almacena la frecuencia cardíaca calculada (0.0 si no hay intervalos válidos).
+
+        Notes:
+            - Este método usa `get_rr_intervals()` (que incorpora `first_samp`) para calcular
+            la media de los intervalos RR en segundos y convertir a BPM.
+        """
+        if hasattr(self, 'rr_intervals') and len(self.rr_intervals) > 0:
+            self.heart_rate = 60.0 / np.mean(self.rr_intervals)
+        else:
+            self.heart_rate = 0.0
+        
+        return self.heart_rate
+    
