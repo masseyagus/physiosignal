@@ -530,14 +530,16 @@ class ECG(RawSignal):
         from matplotlib.patches import Ellipse
         mean_rr = np.mean(rr)
         ellipse = Ellipse(xy=(mean_rr, mean_rr), width=2*SD2_global, height=2*SD1_global,
-                        angle=45, edgecolor="#000000", fc='None', lw=1.5, zorder=4)
+                        angle=45, edgecolor="#000000", fc='None', lw=1.5, zorder=4, label=f'Centroide: {mean_rr:.3f}s')
         ax.add_patch(ellipse)
 
         # Flechas (SD2 sobre identidad, SD1 perpendicular)
         ax.arrow(mean_rr, mean_rr, SD2_global/np.sqrt(2), SD2_global/np.sqrt(2),
-                color="#FF0000", width=0.001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6)
+                color="#FF0000", width=0.001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6,
+                label= f'SD2: {SD2_global:.3f}s')
         ax.arrow(mean_rr, mean_rr, -SD1_global/np.sqrt(2), SD1_global/np.sqrt(2),
-                color="#B700FF", width=0.001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6)
+                color="#B700FF", width=0.001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6,
+                label= f'SD1: {SD1_global:.3f}s')
 
         ax.set_xlabel(r'$RR_n$ (s)', size=12)
         ax.set_ylabel(r'$RR_{n+1}$ (s)', size=12)
@@ -560,9 +562,9 @@ class ECG(RawSignal):
     def dt_waves(self, channels:dict=None, low_freq:float=0.5, high_freq:float=40.0, order:int=5,
                  delineate_method:str='dwt', plot_waves:bool=True, tmin:float=0.0, tmax:float=None):
         """
-        Detección y delineado de ondas P/Q/R/S/T usando NeuroKit2 en una ventana temporal.
+        Detección y punteado de picos P/Q/R/S/T usando NeuroKit2 en una ventana temporal.
 
-        Detecta picos R y delinea las ondas (P, Q, R, S, T) por canal en la ventana
+        Detecta picos R y puntea los picos de las ondas (P, Q, R, S, T) por canal en la ventana
         absoluta [tmin, tmax] (segundos desde el inicio del registro original). Devuelve
         un diccionario con resultados por canal que incluye índices locales, tiempos
         absolutos (s) y la señal filtrada utilizada para la delineación.
@@ -812,7 +814,7 @@ class ECG(RawSignal):
                 'S_peaks': S_peaks,
                 'T_peaks': T_peaks, 'T_onsets': T_onsets, 'T_offsets': T_offsets,
                 'times': times,
-                'delineate_raw': delineate_out,  # raw output if querés investigar
+                'delineate_raw': delineate_out,  # raw output
                 'filtered_signal': sig_clean
             }
 
@@ -834,7 +836,7 @@ class ECG(RawSignal):
 
                 ax.set_xlabel('Tiempo (s)')
                 ax.set_ylabel('Amplitud (µV)')
-                ax.set_title(f'Delineación de Ondas ECG - Canal {ch} - Ventana [{tmin:.1f}–{tmax:.1f}]s')
+                ax.set_title(f'Picos de Ondas ECG - Canal {ch} - Ventana [{tmin:.1f}–{tmax:.1f}]s')
 
                 ax.legend(loc='best')
                 ax.grid(True, linestyle='--', alpha=0.5)
