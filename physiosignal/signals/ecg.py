@@ -264,13 +264,13 @@ class ECG(RawSignal):
         if ecg_raw_slice is not None and plot_raw:
             ax.plot(x_axis, ecg_raw_slice, color="#8B8383", label='Raw Signal', zorder=1)
 
-        ax.plot(x_axis, ecg_clean_slice, color="#4554F7", label='Clean Signal', alpha=0.7, zorder=2)
+        ax.plot(x_axis, ecg_clean_slice, color="#4554F7", label='Clean Signal', alpha=0.9, zorder=2)
 
         if picks_in_window.size > 0:
             amp = ecg_clean_slice[picks_in_window]
 
             ax.scatter(picks_global/self.sfreq, amp, color="#FF0000",
-                       label='R Peaks', zorder=5, alpha=0.7, marker='*')
+                       label='R Peaks', zorder=5, alpha=0.8, marker='*')
         else:
             ax.text(0.02, 0.95, "No R-peaks in plotted window", transform=ax.transAxes,
                     fontsize=10, color="#A2A4A5", verticalalignment='top')
@@ -309,10 +309,10 @@ class ECG(RawSignal):
                         color = get_color_from_string(desc)
 
                         # Dibujar la franja con transparencia
-                        ax.axvspan(draw_start, draw_end, color=color, alpha=0.2, zorder=3)
+                        ax.axvspan(draw_start, draw_end, color=color, alpha=0.2, zorder=1)
                         
                         # Dibujar línea vertical en el inicio de la anotación (opcional)
-                        ax.axvline(x=onset_sec, color="#000000", linestyle="--", alpha=0.7, zorder=4)
+                        ax.axvline(x=onset_sec, color="#000000", linestyle="--", alpha=0.7, zorder=3)
                         
                         # Añadir texto descriptivo
                         ax.text(onset_sec, ax.get_ylim()[1]*0.9, str(desc),
