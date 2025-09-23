@@ -31,7 +31,7 @@ tif_2025/                  # Directorio raíz
 │   ├── signals/
 │   │   ├── __init__.py
 │   │   ├── ecg.py         # En proceso
-│   │   ├── eeg.py         # En proceso
+│   │   ├── eeg.py
 │   │   ├── emg.py         # En proceso
 │   │   ├── raw.py
 │   ├── utils/
@@ -65,3 +65,4 @@ tif_2025/                  # Directorio raíz
   - PyQtGraph
   - PyQt5
   - MNE
+  - NeuroKit2
