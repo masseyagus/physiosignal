@@ -492,18 +492,19 @@ class EEG(RawSignal):
         
         tmin = t_previous_event
         tmax = t_after_event
-        baseline = (t_previous_event, 0)  # Período de línea base
+        baseline = (t_previous_event, 0.0)  # Período de línea base
 
         # Extraigo los epochs alrededor de los eventos
         epochs = mne.Epochs(raw, self.events, event_id=self.event_id, tmin=tmin, tmax=tmax, 
-                            baseline=baseline, preload=True, verbose=False)
+                            baseline=baseline, preload=True, verbose=False, picks='eeg')
+        self.epochs = epochs
         
         # Filtro por epocas del evento seleccionado
         epochs=epochs[self.events[:,2] == event_index]
         
         # Hallo el promedio (ERP) de los epochs
         erp = epochs.average()
-
+        
         if topomap:
             self._topomap(erp, self.events, mne_info, self.event_id, event_index, time_points)
 
