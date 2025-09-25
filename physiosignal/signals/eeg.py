@@ -171,7 +171,7 @@ class EEG(RawSignal):
     """
     
     def __init__(self, raw:RawSignal=None, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
-                 first_samp:int=0, see_log:bool=True, reference:str='promedio'):
+                 first_samp:int=0, see_log:bool=True, reference:str='promedio', is_filetered:bool=False):
         """
         Inicializa una instancia de EEGSignal.
 
@@ -202,6 +202,9 @@ class EEG(RawSignal):
             first_samp : int, optional
                 Índice de la primera muestra respecto del registro original (usado si raw is None).
                 Si se pasa `raw`, el `first_samp` empleado será `raw.first_samp`.
+            is_filtered: bool, optional
+                Indica si la señal ya fue filtrada (True) o es cruda (False). Si se pasa `raw`, se extrae de `raw.is_filtered`.
+                Por defecto False.
             see_log : bool, optional
                 Activa/desactiva logging interno.
             reference : str, optional
@@ -228,8 +231,10 @@ class EEG(RawSignal):
                             deepcopy(raw.anotaciones),
                             deepcopy(raw.first_samp),
                             see_log)
+            self.is_filtered = deepcopy(raw.is_filtered)  # Conservamos si la señal ya estaba filtrada
         else:
             super().__init__(data, sfreq, info, anotaciones, first_samp, see_log)
+            self.is_filtered = is_filtered  # Por defecto, la señal se asume no filtrada
 
         self.reference = reference
 
