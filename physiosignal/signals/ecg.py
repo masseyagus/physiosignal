@@ -57,7 +57,7 @@ class ECG(RawSignal):
     """
 
     def __init__(self, raw:RawSignal=None, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
-                 first_samp:int=0, see_log:bool=True):
+                 first_samp:int=0, see_log:bool=True, is_filtered:bool=False):
         """
         Inicializa una instancia de ECG.
 
@@ -77,6 +77,9 @@ class ECG(RawSignal):
             first_samp : int, optional
                 Offset en muestras del primer dato de `self.data` respecto al inicio del registro original.
                 Por defecto 0. Se almacena como `int(self.first_samp)`.
+            is_filtered: bool, optional
+                Indica si la señal ya fue filtrada (True) o es cruda (False). Si se pasa `raw`, se extrae de `raw.is_filtered`.
+                Por defecto False.
             see_log : bool, optional
                 Controla la configuración del logger interno.
 
@@ -92,8 +95,10 @@ class ECG(RawSignal):
                             deepcopy(raw.anotaciones),
                             deepcopy(raw.first_samp),
                             see_log)
+            self.is_filtered = deepcopy(raw.is_filtered)
         else:
             super().__init__(data, sfreq, info, anotaciones, first_samp, see_log)
+            self.is_filtered = is_filtered  # Por defecto, la señal se asume no filtrada
 
         # Configuración inicial del logger
         log_config(see_log)  
