@@ -823,7 +823,7 @@ class ECG(RawSignal):
 
                 # x axis en segundos alineada con los tiempos globales
                 x_axis = (np.arange(sig_clean.size) + global_offset) / float(self.sfreq)
-                ax.plot(x_axis, sig_clean, label=f'ECG Ch: {ch}', color="#000000", alpha=0.8, zorder=1)
+                ax.plot(x_axis, sig_clean, label=f'ECG Ch: {ch+1}', color="#000000", alpha=0.8, zorder=1)
 
                 # marcar ondas: convertir índices locales -> globales usando global_offset
                 for key, arr in [('R', R_peaks), ('P', P_peaks), ('Q', Q_peaks), ('S', S_peaks), ('T', T_peaks)]:
@@ -836,7 +836,7 @@ class ECG(RawSignal):
 
                 ax.set_xlabel('Tiempo (s)')
                 ax.set_ylabel('Amplitud (µV)')
-                ax.set_title(f'Picos de Ondas ECG - Canal {ch} - Ventana [{tmin:.1f}–{tmax:.1f}]s')
+                ax.set_title(f'Picos de Ondas ECG - Canal {ch+1} - Ventana [{tmin:.1f}–{tmax:.1f}]s')
 
                 ax.legend(loc='best')
                 ax.grid(True, linestyle='--', alpha=0.5)
