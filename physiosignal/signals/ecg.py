@@ -530,16 +530,16 @@ class ECG(RawSignal):
         from matplotlib.patches import Ellipse
         mean_rr = np.mean(rr)
         ellipse = Ellipse(xy=(mean_rr, mean_rr), width=2*SD2_global, height=2*SD1_global,
-                        angle=45, edgecolor="#000000", fc='None', lw=1.5, zorder=4, label=f'Centroide: {mean_rr:.3f}s')
+                        angle=45, edgecolor="#000000", fc='None', lw=1.5, zorder=4, label=f'Centroide: {mean_rr*1000:.3f} ms')
         ax.add_patch(ellipse)
 
         # Flechas (SD2 sobre identidad, SD1 perpendicular)
         ax.arrow(mean_rr, mean_rr, SD2_global/np.sqrt(2), SD2_global/np.sqrt(2),
                 color="#FF0000", width=0.001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6,
-                label= f'SD2: {SD2_global:.3f}s')
+                label= f'SD2: {SD2_global*1000:.1f} ms')
         ax.arrow(mean_rr, mean_rr, -SD1_global/np.sqrt(2), SD1_global/np.sqrt(2),
                 color="#B700FF", width=0.001, head_width=(max_rr-min_rr)*0.01, length_includes_head=True, zorder=6,
-                label= f'SD1: {SD1_global:.3f}s')
+                label= f'SD1: {SD1_global*1000:.1f} ms')
 
         ax.set_xlabel(r'$RR_n$ (s)', size=12)
         ax.set_ylabel(r'$RR_{n+1}$ (s)', size=12)
