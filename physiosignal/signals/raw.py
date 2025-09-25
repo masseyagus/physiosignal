@@ -581,22 +581,37 @@ class RawSignal:
         Características:
             - Scroll vertical de canales.
             - Líneas de anotación.
-            - Escalado Y por tipo de señal.
+            - Escalado Y por tipo de señal (adaptativo y seguro frente a NaN/inf/outliers).
             - Ventana adaptable al número de canales.
+            - Detección automática de unidades/escala implícita (intenta evitar rangos absurdos).
 
         Args:
             picks : str, list[str] optional
-                Canales a visualizar.
+                Canales a visualizar. Si es None se muestran todos los canales disponibles.
+                Si se pasa una lista, los nombres que no existan se ignorarán.
             start : float, optional
-                Tiempo inicial en s.
+                Tiempo inicial en s. Si es None, empieza en 0.0 s.
             duration : float, optional
-                Duración del segmento en s.
+                Duración del segmento en s. Si es None se muestra hasta el final.
             show_anotaciones : bool, optional
-                Mostrar líneas de eventos.
+                Mostrar líneas de eventos/anotaciones en la ventana.
 
         Implementation Details:
-            - Usa PyQt5 y pyqtgraph.
-            - Leyenda horizontal de anotaciones.
+            - Usa PyQt5 y pyqtgraph para la interfaz y el renderizado.
+            - La función obtiene datos mediante `self.get_data(picks=..., start=..., stop=..., times=True)`.
+            - Se aplican medidas de saneamiento a las señales antes de calcular límites Y:
+                * Se filtran NaN/inf con np.nan_to_num.
+                * Se calculan percentiles (1 y 99) y padding adaptativo.
+                * Se usan fallbacks basados en desviación estándar si la señal es constante.
+                * Se aplican topes absolutos para evitar rangos numéricos excesivos que causen
+                overflows/RuntimeWarning en pyqtgraph..
+            - Si hay anotaciones, se crea una leyenda horizontal con colores asignados por
+            descripción de evento.
+            - La ventana creada usará la instancia de QApplication existente si ya existe.
+
+        Returns:
+            None (muestra la ventana interactiva). La ejecución termina en sys.exit(app.exec_())
+            cuando la ventana se cierra.
         """
         import pyqtgraph as pg
         import sys
@@ -690,37 +705,70 @@ class RawSignal:
         # 5. Función para determinar límites Y inteligentes
         def get_ylimits(signal, ch_type):
             """
-            Calcula límites Y adaptativos basados en tipo de señal y percentiles
-            
-            Args:
-                signal: Array 1D con datos del canal
-                ch_type: Tipo de señal (eeg, ecg, emg, etc.)
-            
-            Returns:
-                tuple: (y_min, y_max)
+            Calcula límites Y adaptativos y seguros para plotear una señal 1D.
+
+            - signal: array-like 1D (valores de la señal)
+            - ch_type: string con tipo de señal ('ecg','eeg', etc.) (no obligatorio)
+            Devuelve: (y_min, y_max) como floats seguros y finitos.
             """
-            # Rangos típicos para diferentes tipos de señales
-            type_ranges = {
-                'eeg': (-50, 50),   # μV
-                'ecg': (-150, 350), # mV
-                'emg': (-150, 100), # mV
-                'eog': (-500, 500), # μV
-            }
-            
-            # Uso rango predefinido si el tipo es conocido
-            if ch_type in type_ranges:
-                return type_ranges[ch_type]
-            
-            # Para tipos desconocidos: uso percentiles 1 y 99 con padding
-            p1 = np.percentile(signal, 1)
-            p99 = np.percentile(signal, 99)
-            padding = 0.3 * (p99 - p1)  # 30% de padding
-            
-            # Manejar caso de señal constante
-            if padding == 0:
-                padding = 1 if signal[0] == 0 else abs(signal[0]) * 0.5
-                
-            return (p1 - padding, p99 + padding)
+            # ---- 0) convertir y sanear entrada ----
+            sig = np.asarray(signal, dtype=np.float64)
+            if sig.size == 0:
+                return (-1.0, 1.0)
+
+            # Reemplaza NaN/inf por valores finitos controlados
+            # posinf/neginf se sustituyen por valores grandes pero finitos
+            finfo = np.finfo(np.float64)
+            LARGE = min(finfo.max / 1e6, 1e12)  # límite grande pero no extremo
+            sig = np.nan_to_num(sig, nan=0.0, posinf=LARGE, neginf=-LARGE)
+
+            # ---- 1) percentiles y estadísticas robustas ----
+            try:
+                p1, p99 = np.percentile(sig, [1, 99])
+            except Exception:
+                # si falla con percentiles (por ejemplo señal plana muy rara), usamos min/max
+                p1, p99 = float(np.nanmin(sig)), float(np.nanmax(sig))
+
+            median = float(np.nanmedian(sig))
+            span = float(p99 - p1)
+
+            # ---- 2) fallback si la señal es esencialmente constante ----
+            if np.isclose(span, 0.0):
+                std = float(np.nanstd(sig))
+                if std > 0:
+                    # rango basado en desviación estándar
+                    padding = max(std * 3.0, 1e-6)
+                    y_min, y_max = median - padding, median + padding
+                else:
+                    # señal completamente plana: darle un rango pequeño relativo a la magnitud
+                    mag = max(abs(median), 1.0)
+                    tiny = max(1e-6, 0.01 * mag)  # 1% de la magnitud como margen mínimo
+                    y_min, y_max = median - tiny, median + tiny
+            else:
+                # ---- 3) padding adaptativo en caso normal ----
+                # padding mínimo relativo a la magnitud para señales muy pequeñas
+                padding = max(0.3 * span, 0.01 * max(abs(median), 1.0))
+                y_min, y_max = p1 - padding, p99 + padding
+
+            # ---- 4) evitar límites excesivos (cap absoluto) ----
+            ABS_CAP = 1e9  # tope absoluto razonable (1e9 unidades).
+            # aplica cap de manera que los límites no causen overflow interno al comparar
+            y_min = float(np.clip(y_min, -ABS_CAP, ABS_CAP))
+            y_max = float(np.clip(y_max, -ABS_CAP, ABS_CAP))
+
+            # ---- 5) asegurar orden y separación mínima ----
+            if not np.isfinite(y_min) or not np.isfinite(y_max):
+                # fallback seguro
+                y_min, y_max = -1.0, 1.0
+
+            if y_max <= y_min:
+                # crear un pequeño margen si quedaron iguales o invertidos
+                mag = max(abs(median), 1.0)
+                delta = max(1e-6, 0.01 * mag)
+                y_min, y_max = median - delta, median + delta
+
+            # ---- 7) devolver floats seguros ----
+            return float(y_min), float(y_max)
 
         # 6. Crear gráfico para cada canal con escalado inteligente
         ch_names = self.info.ch_names if picks is None else [ch for ch in self.info.ch_names if ch in picks]
