@@ -723,8 +723,10 @@ class RawSignal:
             return (p1 - padding, p99 + padding)
 
         # 6. Crear gráfico para cada canal con escalado inteligente
+        ch_names = self.info.ch_names if picks is None else [ch for ch in self.info.ch_names if ch in picks]
+
         # Itero sobre cada canal
-        for idx, ch_name in enumerate(self.info.ch_names):
+        for idx, ch_name in enumerate(ch_names):
             # Obtengo el tipo de canal (si está disponible)
             ch_type = self.info.ch_types[idx].lower() if idx < len(self.info.ch_types) else 'unknown'
             
