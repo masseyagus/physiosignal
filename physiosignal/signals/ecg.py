@@ -849,8 +849,97 @@ class ECG(RawSignal):
         
         return results
 
-    def freq_time(self):
-        pass
+    def freq_time(self, channel:int|str=0, tmin:float=0.0, tmax:float=10.0, nperseg:int=256, 
+                  cmap:str='magma', absolute:bool=True, low_freq:float=None, high_freq:float=None):
+        """
+        Genera y muestra el espectrograma (análisis tiempo-frecuencia) de un canal de la señal.
+
+        Calcula el espectrograma de un canal específico del registro usando la función
+        `scipy.signal.spectrogram`, permitiendo definir un intervalo temporal, límites de frecuencia
+        y ajustes según la posición absoluta de la señal. El resultado se muestra como un mapa de
+        potencia en función del tiempo y la frecuencia.
+
+        Args:
+            channel (int | str): Índice o nombre del canal a analizar.
+            tmin (float): Tiempo inicial del segmento en segundos. Por defecto 0.0.
+            tmax (float): Tiempo final del segmento en segundos. Por defecto 10.0.
+            nperseg (int): Número de muestras por segmento para el cálculo del espectrograma.
+            cmap (str): Mapa de color utilizado en la visualización. Por defecto 'magma'.
+            absolute (bool): Si es True, ajusta los tiempos considerando `first_samp` como referencia
+                            absoluta; si es False, se usa el tiempo relativo del segmento.
+            low_freq (float | None): Frecuencia mínima a mostrar (Hz). Si es None, no se aplica filtro inferior.
+            high_freq (float | None): Frecuencia máxima a mostrar (Hz). Si es None, no se aplica filtro superior.
+
+        Raises:
+            ValueError: Si el canal no existe, el índice está fuera de rango o el intervalo temporal es inválido.
+
+        Returns:
+            None: Muestra el espectrograma correspondiente mediante Matplotlib.
+        """
+        from scipy.signal import spectrogram
+        data_length = self.data.shape[1]
+
+        if not isinstance(channel, (int, str)):
+            raise ValueError("El parámetro 'channel' debe ser un entero (índice) o una cadena (nombre).")
+
+        if isinstance(channel, str) and channel not in self.info.ch_names:
+            raise ValueError(f"El canal '{channel}' no existe en la señal.")
+        
+        if tmin > tmax:
+            raise ValueError("Intervalo de tiempo inválido.")
+
+        ch_idx = self.info.ch_names.index(channel) if isinstance(channel, str) else channel
+
+        if ch_idx < 0 or ch_idx >= self.data.shape[0]:
+            raise ValueError("Índice de canal fuera de rango.")
+        
+        if absolute:
+            start = int((tmin * self.sfreq) - self.first_samp)
+            end = int((tmax * self.sfreq) - self.first_samp)
+
+            if start < 0:
+                start = 0
+                logging.info(f"tmin fue ajustado a 0s debido a first_samp ({self.first_samp} = {self.first_samp/self.sfreq}s).")
+                signal_absolute_start_time_sec = self.first_samp / self.sfreq
+            else:
+                signal_absolute_start_time_sec = tmin
+        else:
+            start = int(tmin * self.sfreq)
+            end = int(tmax * self.sfreq)
+            signal_absolute_start_time_sec = (self.first_samp / self.sfreq) + tmin
+
+        if end > data_length:
+            end = data_length
+            logging.info(f"tmax se ajustó al final de los datos ({data_length/self.sfreq}s relativos)")
+
+        if start >= end:
+            raise ValueError("Intervalo de tiempo inválido (tmin está después de tmax o fuera de rango).")
+
+        signal = self.data[ch_idx, start:end]
+        frequencys, times, Sxx = spectrogram(signal, fs=self.sfreq, nperseg=nperseg)
+
+        time = times + signal_absolute_start_time_sec  # ajustar tiempos absolutos
+
+        if low_freq is not None:
+            freq_mask = frequencys >= low_freq
+            frequencys = frequencys[freq_mask]
+            Sxx = Sxx[freq_mask, :]
+
+        if high_freq is not None:   
+            freq_mask = frequencys <= high_freq
+            frequencys = frequencys[freq_mask]
+            Sxx = Sxx[freq_mask, :]
+
+        plt.figure(figsize=(12, 6))
+        plt.pcolormesh(time, frequencys, 10 * np.log10(Sxx), shading='gouraud', cmap=cmap)
+        plt.colorbar(label='Potencia [dB]')
+        plt.ylabel('Frecuencia [Hz]')    
+        plt.xlabel('Tiempo [sec]')
+        plt.title(f'Espectograma del canal {channel}')
+        plt.tight_layout()
+        plt.show()
+
+        return frequencys, time, Sxx
 
     def min_tmax(self, n_beats:int=3, safety:float=1.2, use_percentile:bool=True) -> float:
         """
