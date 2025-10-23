@@ -30,7 +30,7 @@ tif_2025/                  # Directorio raíz
 │   │   ├── logger_config.py
 │   ├── signals/
 │   │   ├── __init__.py
-│   │   ├── ecg.py         # En proceso
+│   │   ├── ecg.py         
 │   │   ├── eeg.py
 │   │   ├── emg.py         # En proceso
 │   │   ├── raw.py
