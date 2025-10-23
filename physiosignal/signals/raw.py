@@ -371,7 +371,12 @@ class RawSignal:
         new_ann = Annotations(onset=onset, duration=duration, description=description, ch_names=ch_names)
         logging.info("Señal recortada correctamente")
 
-        return RawSignal(data=crop_data, sfreq=self.sfreq, info=self.info, anotaciones=new_ann, first_samp=new_first_samp)
+        crop_raw = RawSignal(data=crop_data, sfreq=self.sfreq, info=self.info, anotaciones=new_ann, first_samp=new_first_samp)
+
+        if self.is_filtered:
+            crop_raw.is_filtered = True
+
+        return crop_raw
 
     def describe(self, channels:str|list):
         """
