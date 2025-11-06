@@ -658,8 +658,8 @@ class RawSignal:
         screen_height = screen.height() # Obtengo la altura útil de la pantalla
 
         # Calcular dimensiones de ventana basadas en número de canales
-        BASE_HEIGHT_PER_CHANNEL = 220  # Asigno la altura base con la que se muestra cada canal
-        MIN_WINDOW_HEIGHT = 400        # Altura mínima que tiene la ventana que abre Qt
+        BASE_HEIGHT_PER_CHANNEL = 250  # Asigno la altura base con la que se muestra cada canal
+        MIN_WINDOW_HEIGHT = 450        # Altura mínima que tiene la ventana que abre Qt
         MAX_WINDOW_HEIGHT = int(screen_height * 0.9)  # Limito la altura a un 90% útil de la pantalla
         
         # Calculo altura de la ventana Qt
@@ -691,8 +691,8 @@ class RawSignal:
         
         # 4. Parámetros visuales ajustables
         # Calcular altura por canal basada en número de canales
-        MIN_CHANNEL_HEIGHT = 220 # Altura mínima del gráfico para cada canal
-        MAX_CHANNEL_HEIGHT = 400 # Altura máxima del gráfico para cada canal
+        MIN_CHANNEL_HEIGHT = 250 # Altura mínima del gráfico para cada canal
+        MAX_CHANNEL_HEIGHT = 450 # Altura máxima del gráfico para cada canal
         
         if n_chan <= 4:
             # Para pocos canales, calculo dinámicamente la altura de cada canal
