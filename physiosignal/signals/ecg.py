@@ -229,7 +229,7 @@ class ECG(RawSignal):
             ecg_clean = np.asarray(self.data[ch]).ravel()
             ecg_raw = np.asarray(raw_signal[ch]).ravel()
         else:
-            ecg_clean = self.data.reshape(-1)
+            ecg_clean = self.data
             ecg_raw = raw_signal
 
         # Ventana a mostrar en muestras
@@ -249,22 +249,27 @@ class ECG(RawSignal):
         if slice_start >= slice_end:
             raise ValueError("La ventana solicitada no intersecta la señal almacenada en esta instancia (revisar first_samp).")        
 
-        ecg_clean_slice = ecg_clean[tmin_local:tmax_local]
-        ecg_raw_slice = ecg_raw[tmin_local:tmax_local]
+        ecg_clean_slice = ecg_clean[slice_start:slice_end]
+        ecg_raw_slice = ecg_raw[slice_start:slice_end] if ecg_raw is not None else None
+
+        real_start_samps_global = slice_start + int(self.first_samp)
+        real_start_time_sec = real_start_samps_global / self.sfreq
 
         r_peaks_local_all = self.r_peaks  # local indices
 
         r_peaks_global_all = r_peaks_local_all + int(self.first_samp)
         self.r_peaks_global = r_peaks_global_all
 
-        mask = (r_peaks_global_all >= tmin_samps_global) & (r_peaks_global_all < tmax_samps_global)
+        real_end_samps_global = real_start_samps_global + len(ecg_clean_slice)
+
+        mask = (r_peaks_global_all >= real_start_samps_global) & (r_peaks_global_all < real_end_samps_global)
         picks_global = r_peaks_global_all[mask]
 
-        picks_in_window = picks_global - tmin_samps_global
+        picks_in_window = picks_global - real_start_samps_global
 
         fig, ax = plt.subplots(figsize=(12, 6))
 
-        x_axis = np.arange(tmin_samps_global, tmin_samps_global + len(ecg_clean_slice)) / self.sfreq
+        x_axis = np.arange(len(ecg_clean_slice)) / self.sfreq + real_start_time_sec
 
         if ecg_raw_slice is not None and plot_raw:
             ax.plot(x_axis, ecg_raw_slice, color="#8B8383", label='Raw Signal', zorder=1)
