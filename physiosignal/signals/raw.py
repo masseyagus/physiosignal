@@ -425,44 +425,73 @@ class RawSignal:
         df = pd.DataFrame(results)  # columnas → canales, filas → estadísticas
         return df
 
-    def filter(self, low_freq:float = 1, high_freq:float = 25, order:int = 4, 
-               notch_freq:float = 50.0, q:int =30, inplace:bool=False) -> RawSignal:
+    def filter(self, low_freq:float = None, high_freq:float = None, order:int = 4, 
+               notch_freq:float|list[float] = None, q:int =30, inplace:bool=False, smooth:bool=False) -> RawSignal:
         """
-        Aplica filtrado Butterworth a la señal.
-        
-        Soporta filtros pasa-banda, pasa-alto, pasa-bajo y notch.
+        Aplica filtros de frecuencia (Notch y/o Butterworth) y un suavizado final.
+
+        Esta función procesa la señal `self.data` aplicando hasta tres etapas de
+        filtrado en cascada:
+        1. Uno o más filtros Notch (IIR) para eliminar frecuencias específicas
+           (ej. 50Hz y sus armónicos).
+        2. Un filtro Butterworth (pasa-alto, pasa-bajo o pasa-banda) para 
+           aislar la banda de interés.
+        3. Un filtro de suavizado Savitzky-Golay (savgol_filter) final.
+
+        La función puede modificar la instancia actual (`inplace=True`) o devolver 
+        una nueva instancia `RawSignal` con los datos filtrados.
 
         Args:
-            low_freq : float, optional
-                Corte inferior en Hz. Si es None, no se aplica filtro pasa-altos.
-            high_freq : float, optional
-                Corte superior en Hz. Si es None, no se aplica filtro pasa-bajos.
-            order : int, optional
-                Orden del filtro Butterworth.
-            notch_freq : float, optional
-                Frecuencia central del notch. Si es None, no se aplica filtro notch.
-            q : int, optional
-                Factor de calidad del notch.
+            low_freq (float | None, optional): 
+                Frecuencia de corte (Hz) para el filtro pasa-alto o el límite 
+                inferior del filtro pasa-banda.
+            high_freq (float | None, optional): 
+                Frecuencia de corte (Hz) para el filtro pasa-bajo o el límite 
+                superior del filtro pasa-banda.
+            notch_freq (float | list | None, optional): 
+                Frecuencia o lista de frecuencias (Hz) a eliminar con el filtro(s) notch.
+            order (int, optional): 
+                Orden del filtro Butterworth. Por defecto 4.
+            q (float, optional): 
+                Factor de calidad (Q) para el/los filtros notch. Por defecto 30.
+            inplace (bool, optional): 
+                Si es True, modifica `self.data` en la instancia actual y la marca
+                como filtrada. Si es False (por defecto), retorna una nueva instancia
+                `RawSignal` con los datos filtrados.
 
         Returns:
-            RawSignal: Nueva instancia filtrada.
+            RawSignal | self: 
+                Una nueva instancia `RawSignal` con los datos filtrados (si `inplace=False`), 
+                o la propia instancia modificada (si `inplace=True`).
 
         Raises:
-            ValueError: Si los parámetros de frecuencia son inválidos.
-            ValueError: Si no se especifica al menos una frecuencia de corte.
-
-        Notes:
-            - Usa filtfilt para preservar fase (fase cero).
-            - Valores recomendados por tipo de señal:
-            * EEG: low_freq=0.5, high_freq=40-70
-            * ECG: low_freq=0.5-1.0, high_freq=35-40
-            * EMG: low_freq=10-20, high_freq=400-500
+            ValueError: 
+                - Si no se especifica ningún parámetro de filtrado (low_freq, high_freq, o notch_freq).
+                - Si alguna frecuencia está fuera del rango válido (0 a Nyquist).
+                - Si `low_freq >= high_freq`.
+        
+        Behavior / Notes:
+            - Orden de Aplicación: Los filtros se aplican en serie: 
+              1º Filtro(s) Notch.
+              2º Filtro Butterworth.
+              3º Filtro Savitzky-Golay.
+            - Tipo de Filtro: El tipo de Butterworth (pasa-alto, pasa-bajo, pasa-banda) 
+              se determina automáticamente según qué combinaciones de `low_freq` y 
+              `high_freq` se provean.
+            - Filtro Notch: Si se provee una lista, se aplica un filtro por cada 
+              frecuencia en cascada, uno después del otro.
+            - Suavizado Final: Se aplica un filtro `savgol_filter`, en caso de `smooth=True`,
+              (con window_length=11, polyorder=3) a la señal resultante de los 
+              filtros anteriores.
+            - Estado: La instancia (nueva o actual) se marca con `self.is_filtered = True`.
+            - Phase Shift: Todos los filtros (Notch y Butterworth) se aplican usando
+              `signal.filtfilt` para evitar introducir desfase en la señal.
         """
         import scipy.signal as signal
 
         # Validación de parámetros
-        if low_freq is None and high_freq is None:
-            raise ValueError("Debe especificar al menos una frecuencia de corte (low_freq o high_freq)")
+        if low_freq is None and high_freq is None and notch_freq is None:
+            raise ValueError("Debe especificar al menos una frecuencia de corte (low_freq, high_freq o notch_freq)")
 
         if low_freq is not None and low_freq < 0:
             raise ValueError("low_freq debe ser mayor o igual a 0")
@@ -472,20 +501,22 @@ class RawSignal:
 
         if high_freq is not None and high_freq > self.sfreq / 2:
             raise ValueError(f"high_freq no puede exceder la frecuencia de Nyquist ({self.sfreq/2} Hz)")
-
+        
         # Copia de la señal para procesar
         processed_signal = self.data.copy()
+        
+        for notch in notch_freq if isinstance(notch_freq, list) else [notch_freq]:
 
-        # Aplicar filtro notch si se especificó
-        if notch_freq is not None:
-            if notch_freq <= 0 or notch_freq >= self.sfreq / 2:
+            if notch <= 0 or notch >= self.sfreq / 2:
                 raise ValueError("notch_freq debe estar entre 0 y la frecuencia de Nyquist")
             
             # Crear filtro notch
-            b_notch, a_notch = signal.iirnotch(notch_freq, q, self.sfreq)
+            b_notch, a_notch = signal.iirnotch(notch, q, self.sfreq)
             
             # Aplicar filtro notch
             processed_signal = signal.filtfilt(b_notch, a_notch, processed_signal, axis=-1)
+
+        b, a = None, None
 
         # Aplicar filtro Butterworth según los parámetros
         if low_freq is not None and high_freq is not None:
@@ -498,17 +529,22 @@ class RawSignal:
             # Filtro pasa-bajo
             b, a = signal.butter(order, high_freq, btype='low', fs=self.sfreq)
 
+        if b is not None:
         # Aplicar el filtro Butterworth
-        filtered_signal = signal.filtfilt(b, a, processed_signal, axis=-1)
-        smoothed_data = signal.savgol_filter(filtered_signal, window_length=11, polyorder=3)
+            filtered_signal = signal.filtfilt(b, a, processed_signal, axis=-1)
+        else:
+            filtered_signal = processed_signal
+
+        if smooth:
+            filtered_signal = signal.savgol_filter(filtered_signal, window_length=11, polyorder=3)
 
         if inplace:
-            self.data = smoothed_data
+            self.data = filtered_signal
             self.is_filtered = True
             return self
         
         # Crear nueva instancia con la señal filtrada
-        filtered_signal = RawSignal(data=smoothed_data, sfreq=self.sfreq, info=self.info, 
+        filtered_signal = RawSignal(data=filtered_signal, sfreq=self.sfreq, info=self.info, 
                                     anotaciones=self.anotaciones, first_samp=self.first_samp)
         
         filtered_signal.is_filtered = True
@@ -983,6 +1019,104 @@ class RawSignal:
         plt.grid(True, which='both', linestyle='--', alpha=0.7)
         plt.tight_layout()
         plt.show()
+
+    def fft(self, pick_channel:list[int]|int=0, plot:bool=True, low_freq:float=None, high_freq:float=None):
+        """
+        Calcula la Transformada Rápida de Fourier (FFT) usando el método de Welch para la señal EEG y permite 
+        visualizar el espectro de potencia para canales y bandas de frecuencia específicos.
+
+        Args:
+            pick_channel : list or str, optional
+                Lista o nombre de canales a analizar. Por defecto 'Cz'.
+            band : list or str, optional
+                Lista o nombre de bandas de frecuencia predefinidas a visualizar. 
+                Opciones: 'Delta', 'Theta', 'Alpha', 'Beta', 'Gamma'. Por defecto 'Alpha'.
+            plot : bool, optional
+                Si True, muestra gráficos del espectro de potencia. Por defecto True.
+            low_freq : float, optional
+                Límite inferior de frecuencia personalizado (Hz). Si se especifica junto con high_freq, 
+                ignora las bandas predefinidas. Por defecto None.
+            high_freq : float, optional
+                Límite superior de frecuencia personalizado (Hz). Si se especifica junto con low_freq, 
+                ignora las bandas predefinidas. Por defecto None.
+
+        Raises:
+            ValueError
+                Si no se ha aplicado previamente un método de referencia, si los canales especificados no existen,
+                o si las bandas de frecuencia no son válidas.
+
+        Notes:
+            El espectro de potencia se calcula usando el método de Welch y se convierte a escala logarítmica (dB).
+            Los resultados se guardan en los atributos `fft_psd` (densidad espectral de potencia) y `fft_freq` (frecuencias).
+            Si se especifican low_freq y high_freq, se ignora el parámetro band y se usa el rango de frecuencia personalizado.
+            El gráfico muestra el espectro de potencia suavizado para cada canal seleccionado.
+
+        Examples:
+            >>> eeg.fft(pick_channel='Cz', band='Alpha')
+            >>> eeg.fft(pick_channel=['Cz', 'Pz'], band=['Alpha', 'Beta'])
+            >>> eeg.fft(pick_channel='Oz', low_freq=8.0, high_freq=12.0)
+        """
+        from scipy.signal import welch
+        import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
+
+        data = np.atleast_2d(self.data)
+
+        ch_idx = pick_channel
+        if isinstance(ch_idx, int):
+                    ch_idx = [ch_idx]
+
+        data_ch = data[ch_idx, :]
+        freqs, psd = welch(data_ch, fs=self.sfreq, nperseg=1024, axis=1)
+
+        self.fft_psd = 10 * np.log10(psd + 1e-12)
+        self.fft_freq = freqs
+
+        if plot:
+
+            # Configuración de colores
+            if len(ch_idx) <= 8:
+                distinct_colors = [
+                    '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
+                    '#9467bd', '#8c564b', '#e377c2', '#7f7f7f'
+                ]
+                colors = distinct_colors[:len(ch_idx)]
+            else:
+                colormap = cm.get_cmap('tab20', len(ch_idx))
+                colors = [mcolors.to_hex(colormap(i)) for i in range(len(ch_idx))]
+
+            if low_freq is not None and high_freq is not None:
+                band_mask = (self.fft_freq >= low_freq) & (self.fft_freq <= high_freq)
+            else:
+                low_freq = 0
+                high_freq = self.sfreq / 2
+                band_mask = (self.fft_freq >= low_freq) & (self.fft_freq <= high_freq)
+
+            fig, ax = plt.subplots(figsize=(10, 5))
+
+            for i, channel_idx in enumerate(ch_idx):
+                channel_name = self.info.ch_names[channel_idx]
+                y_data = self.fft_psd[i, band_mask]
+
+                from scipy.ndimage import gaussian_filter1d
+                y_smooth = gaussian_filter1d(y_data, sigma=0.8)
+
+                ax.plot(self.fft_freq[band_mask], y_smooth, color=colors[i], label=f'Canal {channel_name}', linewidth=2)
+
+            if self.is_filtered:
+                title = f'Espectro de Potencia de Señal Filtrada - Banda ({low_freq}-{high_freq} Hz)'
+            else:
+                title = f'Espectro de Potencia de Señal Cruda - Banda ({low_freq}-{high_freq} Hz)'
+        
+            ax.set_title(title)
+            ax.set_xlabel('Frecuencia (Hz)')
+            ax.set_ylabel('Densidad Espectral de Potencia (dB)')
+            ax.legend(loc='upper right', fontsize=10, framealpha=0.9)
+            
+            ax.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            plt.show()
 
     def __getitem__(self, idx): 
         """
