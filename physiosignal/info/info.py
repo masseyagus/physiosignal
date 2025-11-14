@@ -5,29 +5,60 @@ import numpy as np
 @dataclass
 class Info:
     """
-    Clase para almacenar y gestionar metadatos de registros de señales fisiológicas.
-    Implementa comportamiento similar a diccionario con funcionalidades extendidas para
-    manejo seguro de metadatos biomédicos.
+    Clase para almacenar y gestionar metadatos asociados a registros de señales fisiológicas.
+    Proporciona una interfaz similar a un diccionario, incorporando validaciones y utilidades
+    específicas para ingeniería biomédica y análisis de biosignales.
+
+    Esta clase permite organizar información de canales, tipos de señal, frecuencia de muestreo,
+    detalles del sujeto, del experimento y otros metadatos necesarios para garantizar trazabilidad
+    y consistencia en pipelines de procesamiento.
 
     Args:
-        ch_names: Lista de nombres de canales (default: lista vacía)
-        ch_types: Tipo(s) de canal - cadena única o lista por canal (default: lista vacía)
-        sfreq: Frecuencia de muestreo en Hz (default: 512.0)
-        bad_channels: Lista de canales marcados como defectuosos (default: lista vacía)
-        experimenter: Nombre del experimentador/responsable (opcional)
-        subject_info: Información adicionañ del sujeto en formato str/dict (opcional)
-        register_type: Tipo de registro/experimento (opcional)
+        ch_names (List[str]):
+            Lista de nombres de canales en el orden en que aparecen los datos.
+        ch_types (Union[str, List[str]]):
+            Tipo(s) de canal, ya sea como cadena única (aplicada a todos los canales) o como
+            lista paralela a `ch_names`. Ejemplos típicos: "ecg", "eeg", "emg".
+        sfreq (float):
+            Frecuencia de muestreo del registro en Hz. Debe ser ≥ 1 Hz.
+        bad_channels (List[str]):
+            Lista de canales marcados como defectuosos o con mala calidad.
+        experimenter (str, opcional):
+            Nombre del operador o responsable del registro.
+        subject_info (str | dict, opcional):
+            Información adicional del sujeto (edad, ID interno, comentarios, etc.).
+        register_type (str, opcional):
+            Tipo de estudio o protocolo del registro (ej: "ECG-Holter", "EEG-Rest", "PSG", etc.).
+
+    Funcionalidades principales:
+        - Acceso tipo diccionario mediante `obj[key]`.
+        - Renombrado seguro de canales preservando metadata asociada.
+        - Filtrado de canales por tipo.
+        - Conversión automática de tipos de canal a listas consistentes.
+        - Validación integrada de frecuencias y coherencia entre nombres y tipos.
+        - Exportación de metadatos como diccionario (`items()`) o tabla HTML (`visualizeInfo()`).
 
     Raises:
-        KeyError: Al acceder a atributos no existentes mediante operador []
-        ValueError: En operaciones de renombrado inválidas o datos inconsistentes
+        ValueError:
+            - Si la longitud de `ch_names` no coincide con la de `ch_types`.
+            - Si `sfreq` es menor a 1 Hz.
+            - Si un renombrado genera duplicados o referencia nombres inexistentes.
+        KeyError:
+            - Si se intenta acceder mediante `[]` a un atributo inexistente.
+
+    Notes:
+        - Esta clase está pensada para integrarse con estructuras de señales más grandes
+          (por ejemplo, contenedores tipo MNE, objetos Raw personalizados, o pipelines
+          de análisis propios).
+        - Mantiene una filosofía de diseño estricta respecto a la integridad de los metadatos,
+          evitando inconsistencias silenciosas entre canales, tipos y propiedades de registro.
     """
     ch_names:List[str] = field(default_factory=list)
     ch_types:Union[str, List[str]] = field(default_factory=list)
     sfreq:float = field(default_factory=512.0)
     bad_channels:List[str] = field(default_factory=list)
     experimenter:str=None
-    subject_info:str=None
+    subject_info:str|dict=None
     register_type:str=None
 
     def __post_init__(self):
@@ -275,5 +306,4 @@ class Info:
                 orig_idx = orig_names.index(name)
                 new_types.append(orig_types[orig_idx])
             self.ch_types = new_types
-
 
