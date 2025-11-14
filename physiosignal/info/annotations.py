@@ -5,22 +5,64 @@ import logging
 
 class Annotations:
     """
-    Representa un conjunto de anotaciones temporales para señales fisiológicas.
+    Clase para gestionar anotaciones asociadas a señales fisiológicas, manteniendo
+    coherencia temporal, validación estricta y soporte para múltiples canales por evento.
+
+    Esta estructura permite almacenar eventos, marcadores y etiquetas asociados a
+    registros biomédicos (como EEG, ECG, PSG o EMG), preservando tiempos de inicio,
+    duración, descripción y canales relacionados. Se integra con pipelines de análisis
+    ofreciendo funcionalidades de adición, eliminación, búsqueda y exportación segura.
 
     Attributes:
-        onset (np.ndarray): Array de tiempos de inicio de las anotaciones.
-        duration (np.ndarray): Array de duraciones de las anotaciones.
-        description (np.ndarray): Array de descripciones textuales.
-        ch_names (np.ndarray | None): Array de nombres de canales asociados. Cada elemento
-            puede ser None o una lista de cadenas (si la anotación tiene uno o varios canales).
+        onset (np.ndarray):
+            Vector 1D con los tiempos de inicio de cada anotación en segundos.
+        duration (np.ndarray):
+            Vector 1D con las duraciones correspondientes en segundos.
+        description (np.ndarray):
+            Vector 1D con descripciones textuales de cada evento.
+        ch_names (np.ndarray | None):
+            Vector 1D donde cada elemento puede ser:
+            - None (evento global)
+            - una cadena (evento asociado a un canal)
+            - una lista de cadenas (evento multicanal).
+            Internamente se almacena como array de dtype=object.
+        logs (bool):
+            Indica si la instancia emite mensajes de logging.
+        _logger (logging.Logger):
+            Logger interno usado para registrar acciones.
 
-    Methods:
-        add: Añade nuevas anotaciones al conjunto, evitando duplicados e incorporando
-             uno o varios canales por anotación.
-        remove: Elimina anotaciones según criterios de onset, duration, description o canales.
-        get_annotations: Retorna todas las anotaciones como un DataFrame con columnas
-                         onset, duration, description y ch_names, ajustando ch_names
-                         para que coincida en longitud con las otras columnas.
+    Funcionalidades principales:
+        - Validación automática de longitudes y tipos mediante `_checking()`.
+        - Ordenamiento cronológico automático mediante `_sort()`.
+        - Soporte para anotaciones multicanal en forma flexible y homogénea.
+        - Inserción segura de nuevas anotaciones evitando duplicados exactos.
+        - Eliminación selectiva por múltiples criterios independientes.
+        - Búsqueda de eventos por valor, descripción o columna particular.
+        - Exportación a CSV y carga de anotaciones desde archivo.
+
+    Usage:
+        >>> anot = Annotations(onset=[1.0], duration=[0.1], description=["Blink"])
+        >>> anot.add(2.5, 0.2, "Artifact", ["Fp1", "Fp2"])
+        >>> df = anot.get_annotations()
+        >>> print(df)
+
+    Raises:
+        ValueError:
+            - Si los parámetros iniciales tienen longitudes incompatibles.
+            - Si alguna columna obligatoria falta durante la carga desde archivo.
+        TypeError:
+            - Si los argumentos no pueden convertirse a arrays 1D válidos.
+        LookupError:
+            - Si una búsqueda especifica columnas inexistentes o no encuentra coincidencias.
+        FileNotFoundError:
+            - Si se intenta cargar desde una ruta de archivo inexistente.
+
+    Notes:
+        - Todas las validaciones y normalizaciones se centralizan en `_checking()` para
+          garantizar coherencia interna sin replicar lógica.
+        - Las anotaciones siempre se almacenan ordenadas por `onset`.
+        - El diseño permite representar tanto eventos puntuales como marcas complejas
+          de múltiples canales, facilitando análisis posteriores.
     """
 
     def __init__(self, onset=None, duration=None, description=None, ch_names=None, see_logs:bool=True):
