@@ -12,48 +12,59 @@ import matplotlib.pyplot as plt
 class ECG(RawSignal):
     """
     Representa una señal de Electrocardiografía (ECG) con utilidades para
-    detección de picos R, cálculo de frecuencia cardiaca, evaluación de calidad
-    de señal y visualizaciones avanzadas.
+    detección de picos R, cálculo de frecuencia cardiaca y visualizaciones avanzadas. 
 
-    Key Features:
-        - Detección de picos R mediante NeuroKit2 (`nk.ecg_peaks`)
-        - Cálculo de intervalos RR y frecuencia cardíaca
-        - Evaluación de calidad de señal basada en métricas de detección
-        - Delineado de ondas P, Q, R, S, T
-        - Visualización: plot de picos R, segmentación de latidos, Poincaré con SD1/SD2
-        - Estimación automática de ventanas temporales óptimas para análisis
-    
     Attributes:
-        data : np.ndarray
-            Señal ECG cruda; forma (n_canales, n_muestras) o (n_muestras,) si mono.
-        sfreq : float
-            Frecuencia de muestreo en Hz.
-        info : Info
-            Metadatos de canales.
-        anotaciones : Annotations
-            Anotaciones externas (onset en segundos absolutos, duration en segundos, description).
-        first_samp : int
-            Offset en muestras del primer dato de `self.data` respecto al registro original.
-        peaks : dict-like | None
-            Resultado retornado por `nk.ecg_peaks`.
-        info_peaks : dict-like | None
-            Diccionario de info devuelto por `nk.ecg_peaks`.
-        r_peaks : np.ndarray | None
-            Índices locales de picos R detectados.
-        r_peaks_global : np.ndarray | None
-            Índices de picos en coordenada global (local + first_samp).
-        heart_rate : float | None
-            Frecuencia cardiaca estimada (BPM).
-        rr_intervals : np.ndarray | None
-            Intervalos RR en segundos, calculados durante la detección de picos.
-        rr_times : np.ndarray | None
-            Tiempos absolutos de los intervalos RR.
+        data: np.ndarray
+            Señal ECG cruda; forma (n_canales, n_muestras) o (n_muestras,) si es mono. 
+        sfreq: float
+            Frecuencia de muestreo en Hz. 
+        info: Info
+            Metadatos de canales. 
+        anotaciones: Annotations
+            Anotaciones externas (onset en segundos absolutos, duration en segundos,
+            description). 
+        first_samp: int
+            Offset en muestras del primer dato de 'self.data respecto al registro original. 
+        peaks: dict-like | None
+            Resultado retornado por `nk.ecg_peaks`. 
+        info_peaks: dict-like | None
+            Diccionario de info devuelto por `nk.ecg_peaks'. 
+        r_peaks: np.ndarray | None
+            Índices locales de picos R detectados. 
+        r_peaks_global: np.ndarray | None
+            Índices de picos en coordenada global (local + first_samp). 
+        heart_rate: float | None
+            Frecuencia cardiaca estimada (BPM). 
+        rr_intervals: np.ndarray | None
+            Intervalos RR en segundos, calculados durante la detección de picos. 
+        rr_times: np.ndarray | None
+            Tiempos absolutos de los intervalos RR. 
+
+    Raises:
+        TypeError:
+            Si 'data' no es un np.ndarray o 'sfreq' no es numérico en la
+            instanciación.
+        ValueError:
+            Si se llama a métodos dependientes (ej. `get_instantaneous_hr`)
+            sin que la detección de picos se haya ejecutado exitosamente
+            (ej. 'self.r_peaks' es None).
+    
+    Funcionalidades principales:
+        - Detección de picos R mediante NeuroKit2 ('nk.ecg_peaks'), cálculo
+          de intervalos RR y frecuencia cardíaca. 
+        - Delineado de ondas P, Q, R, S, T. 
+        - Visualización: plot de picos R, segmentación de latidos, Poincaré
+          con SD1/SD2. 
+        - Estimación automática de ventanas temporales óptimas para análisis. 
 
     Notes:
-        - El preprocesamiento debe hacerse usando los métodos de la clase RawSignal.
-        - `first_samp` se interpreta como número de muestras de offset.
-        - Los métodos de calidad de señal ayudan a determinar la confiabilidad de los resultados.
-        - Los métodos de estimación de ventanas proporcionan valores por defecto inteligentes.
+    - El preprocesamiento debe hacerse usando los métodos de la clase RawSignal. 
+    - 'first_samp' se interpreta como número de muestras de offset. 
+    - Los métodos de calidad de señal ayudan a determinar la confiabilidad de los
+      resultados. 
+    - Los métodos de estimación de ventanas proporcionan valores por defecto
+      inteligentes. 
     """
 
     def __init__(self, raw:RawSignal=None, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
@@ -428,7 +439,7 @@ class ECG(RawSignal):
         ax.set_xlabel('Time (seconds)')
         ax.set_ylabel('Amplitude (µV)')
 
-            # Asegurarse de que heart_rate esté calculado
+        # Aseguramos de que heart_rate esté calculado
         if not hasattr(self, 'heart_rate') or self.heart_rate is None:
             self._compute_heart_rate()
 
@@ -768,20 +779,25 @@ class ECG(RawSignal):
                 arr_idx = np.round(arr_finite).astype(int)
                 return arr_idx
             
+            # -------------- Picos P --------------
             P_peaks = _getarr(delineate_out, 'ECG_P_Peaks')
             P_onsets = _getarr(delineate_out, 'ECG_P_Onsets')
             P_offsets = _getarr(delineate_out, 'ECG_P_Offsets')
 
+            # -------------- Picos Q --------------
             Q_peaks = _getarr(delineate_out, 'ECG_Q_Peaks')
             Q_onsets = _getarr(delineate_out, 'ECG_Q_Onsets')
             Q_offsets = _getarr(delineate_out, 'ECG_Q_Offsets')
 
+            # -------------- Picos R --------------
             R_peaks = r_peaks
             R_onsets = _getarr(delineate_out, 'ECG_R_Onsets')
             R_offsets = _getarr(delineate_out, 'ECG_R_Offsets')
 
+            # -------------- Picos S --------------
             S_peaks = _getarr(delineate_out, 'ECG_S_Peaks')
 
+            # -------------- Picos T --------------
             T_peaks = _getarr(delineate_out, 'ECG_T_Peaks')
             T_onsets = _getarr(delineate_out, 'ECG_T_Onsets')
             T_offsets = _getarr(delineate_out, 'ECG_T_Offsets')    
