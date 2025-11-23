@@ -345,8 +345,8 @@ class ECG(RawSignal):
                         ax.text(onset_sec, ax.get_ylim()[1]*0.9, str(desc),
                                 rotation=90, verticalalignment="bottom", fontsize=10, color="#00C853")
 
-        ax.set_xlabel('Tiempo (s)')
-        ax.set_ylabel('Amplitud (µV)')
+        ax.set_xlabel('Tiempo [s]')
+        ax.set_ylabel('Amplitud [µV]')
         ax.set_title(f"Detección de Picos R  — Ventana [{tmin:.1f}–{tmax:.1f}]s")
         ax.legend()
 
@@ -436,8 +436,8 @@ class ECG(RawSignal):
         ax.axvline(0, color="#000000", linestyle='--', alpha=0.5)
         
         # Configurar la gráfica
-        ax.set_xlabel('Time (seconds)')
-        ax.set_ylabel('Amplitude (µV)')
+        ax.set_xlabel('Time [s]')
+        ax.set_ylabel('Amplitude [µV]')
 
         # Aseguramos de que heart_rate esté calculado
         if not hasattr(self, 'heart_rate') or self.heart_rate is None:
@@ -860,7 +860,7 @@ class ECG(RawSignal):
                         ax.scatter(arr_global[valid_mask] / float(self.sfreq), sig_clean[arr[valid_mask]],
                                 label=f'Picos {key}', s=30, zorder=3)
 
-                ax.set_xlabel('Tiempo (s)')
+                ax.set_xlabel('Tiempo [s]')
                 ax.set_ylabel('Amplitud (µV)')
                 ax.set_title(f'Picos de Ondas ECG - Canal {ch+1} - Ventana [{tmin:.1f}–{tmax:.1f}]s')
 
@@ -955,7 +955,7 @@ class ECG(RawSignal):
         plt.pcolormesh(time, frequencys, 10 * np.log10(Sxx), shading='gouraud', cmap=cmap)
         plt.colorbar(label='Potencia [dB]')
         plt.ylabel('Frecuencia [Hz]')    
-        plt.xlabel('Tiempo [sec]')
+        plt.xlabel('Tiempo [s]')
         plt.title(f'Espectograma del canal {channel}')
         plt.tight_layout()
         plt.show()
