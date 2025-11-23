@@ -85,7 +85,7 @@ class EMG(RawSignal):
         """
         pass
 
-    def tkeo_envelope(self, traditional:bool=False, channel:int=0, tmin:int=0, tmax:int=10):
+    def tkeo_envelope(self, traditional:bool=False, channel:int|str=0, tmin:int=0, tmax:int=10):
         """
         Calcula y visualiza la envolvente de la señal EMG utilizando el operador de energía Teager-Kaiser (TKEO).
 
@@ -97,7 +97,7 @@ class EMG(RawSignal):
         Args:
             traditional (bool): Si es True, calcula y grafica también la envolvente tradicional (rectificación
                                 + filtro paso bajo) para comparación. Por defecto False.
-            channel (int): Índice del canal a analizar. Por defecto 0.
+            channel (int, str): Índice o nombre del canal a analizar. Por defecto 0.
             tmin (int): Tiempo inicial del segmento en segundos. Por defecto 0.
             tmax (int): Tiempo final del segmento en segundos. Por defecto 10.
 
@@ -114,6 +114,12 @@ class EMG(RawSignal):
             if channel >= self.data.shape[0]:
                 raise ValueError("El canal especificado excede el número de canales en la señal EMG.")
             
+            if isinstance(channel, str):
+                if channel in self.info.ch_names:
+                    channel = self.info.ch_names.index(channel)
+                else:
+                    raise ValueError(f"El canal '{channel}' no existe en la señal EMG.")
+                
             signal_1d = np.asarray(self.data[channel]).ravel()
 
         else:
@@ -188,8 +194,142 @@ class EMG(RawSignal):
         ax.grid(True, alpha=0.6)
         plt.title('Comparativa: EMG Original vs Envolvente Tradicional vs TKEO')
         plt.show()
+
+    def hilbert(self, tmin:int=0, tmax:int=10, channels:str|int|list[str|int]=0, 
+                low_freq:float=0.5, high_freq:float=150):
+        """
+        Calcula y visualiza la envolvente de la señal EMG usando la Transformada de Hilbert.
+
+        Aplica un filtro paso banda (Butterworth de 4to orden) a la señal para aislar las frecuencias
+        musculares relevantes y luego calcula la señal analítica mediante la Transformada de Hilbert.
+        La magnitud de esta señal analítica (la envolvente) representa la amplitud instantánea, útil para
+        estimar la fuerza muscular manteniendo las unidades originales (µV).
+
+        Args:
+            tmin (float, opcional): Tiempo de inicio del análisis en segundos. Por defecto 0.
+            tmax (float, opcional): Tiempo de fin del análisis en segundos. Por defecto 10.
+            channels (int | str | list[int|str], opcional): Canal(es) a analizar. Puede ser un índice,
+                                                             un nombre o una lista de ellos. Por defecto 0.
+            low_freq (float, opcional): Frecuencia de corte inferior para el filtro paso banda (Hz).
+                                        Por defecto 0.5.
+            high_freq (float, opcional): Frecuencia de corte superior para el filtro paso banda (Hz).
+                                         Por defecto 150.
+
+        Raises:
+            ValueError: Si el canal no existe, si los tiempos son inválidos (`tmin >= tmax`), si la ventana
+                        no intersecta con los datos o si los parámetros de frecuencia violan Nyquist.
+
+        Returns:
+            tuple:
+                - hilbert_signal (np.ndarray): Señal analítica compleja (parte real es la señal filtrada).
+                - envelope (np.ndarray): Envolvente de amplitud (magnitud de la señal analítica).
+                Ambos arrays tienen la forma (n_canales_seleccionados, n_muestras_recortadas).
+
+        Notes:
+            - El filtro aplicado es un Butterworth pasa-banda de 4to orden, sin fase (`filtfilt`).
+            - Si `high_freq` supera la frecuencia de Nyquist, se ajusta automáticamente a 0.99 * Nyquist.
+            - Genera un gráfico por cada canal seleccionado comparando la señal filtrada y su envolvente.
+
+        Examples:
+            >>> # Envolvente del canal 0 entre 5s y 15s
+            >>> analytic, env = emg.hilbert(tmin=5, tmax=15, channels=0)
+            >>>
+            >>> # Envolvente de un canal específico con filtro personalizado
+            >>> _, env = emg.hilbert(channels='EMG1', low_freq=10, high_freq=200)
+        """
+        from scipy.signal import hilbert, butter, filtfilt
+
+        # ------ Normalización de Canales ------
+        ch_idx = []
+        ch_labels = []
+
+        if isinstance(channels, (int, str)):
+            input_list = [channels]
+        else:
+            input_list = channels
+
+        for ch in input_list:
+
+            if isinstance(ch, int):
+                if ch < 0 or ch >= self.data.shape[0]:
+                    raise ValueError(f"El índice de canal {ch} está fuera de rango.")
+                
+                ch_idx.append(ch)
+                ch_labels.append(self.info.ch_names[ch])
+            
+            elif isinstance(ch, str):
+                if ch in self.info.ch_names:
+                    idx = self.info.ch_names.index(ch)
+                    ch_idx.append(idx)
+                    ch_labels.append(ch)
+
+                else:
+                    raise ValueError(f"El canal '{ch}' no existe en la señal EMG.")
+            
+            else:
+                 raise ValueError("Los canales deben ser int o str.")
+
+        # ------ Tiempos ------
+        tmin_samps_global = int(tmin * self.sfreq)
+        tmax_samps_global = int(tmax * self.sfreq)
+
+        if tmin_samps_global >= tmax_samps_global:
+            raise ValueError("tmin debe ser menor que tmax.")
+
+        tmin_local = tmin_samps_global - int(self.first_samp)
+        tmax_local = tmax_samps_global - int(self.first_samp)
+
+        n_local = self.data.shape[1] if self.data.ndim > 1 else self.data.shape[0]
         
-    def segment(self, umbral:float, min_duration:float=0.001, channel:int=0, tmin:int=0, tmax:int=10):
+        slice_start = max(0, tmin_local)
+        slice_end = min(n_local, tmax_local)
+
+        if slice_start >= slice_end:
+            raise ValueError("La ventana solicitada no intersecta la señal almacenada.")  
+
+        data = self.data[ch_idx, slice_start:slice_end]
+        data = np.atleast_2d(data)
+
+        nyquist = self.sfreq / 2
+        low = low_freq / nyquist
+        high = high_freq / nyquist
+        
+        # Validar que high < 1.0 (Nyquist)
+        if high >= 1.0:
+            high = 0.99 
+            print("Warning: high_freq ajustada al límite de Nyquist.")
+
+        b_butter, a_butter = butter(4, [low, high], btype='band')
+        data_filtered = filtfilt(b_butter, a_butter, data, axis=1)
+
+        # Transformada de Hilbert
+        hilbert_signal = hilbert(data_filtered, axis=1)
+        envelope = np.abs(hilbert_signal)
+
+        n_segment = data.shape[1]
+        start_time_abs = (slice_start + self.first_samp) / self.sfreq
+        t = (np.arange(n_segment) / self.sfreq) + start_time_abs
+
+        for i, idx_ch in enumerate(ch_idx):
+            plt.figure(figsize=(12, 6))
+
+            # Grafico la señal filtrada
+            plt.plot(t, np.real(hilbert_signal[i]), label='Señal Filtrada (Bandpass)', color="#002FFF", alpha=0.6)
+
+            # Grafico la envolvente
+            plt.plot(t, envelope[i], label='Envolvente (Hilbert)', color="#FF7300", linewidth=2)
+            
+            plt.title(f"Transformada de Hilbert - Canal: {ch_labels[i]}")
+            plt.xlabel("Tiempo [s]")
+            plt.ylabel("Amplitud [µV]")
+            plt.legend()
+            plt.grid(True, alpha=0.4, color='#000000')
+            plt.tight_layout()
+            plt.show()
+
+        return hilbert_signal, envelope
+
+    def segment(self, umbral:float, channel:int=0, tmin:int=0, tmax:int=10):
         """
         Segmenta y visualiza períodos de activación muscular basándose en un umbral de amplitud.
 
@@ -200,8 +340,6 @@ class EMG(RawSignal):
 
         Args:
             umbral (float): Valor de amplitud (µV) mínimo para considerar una activación muscular.
-            min_duration (float): Duración mínima en segundos para considerar un evento válido.
-                                  Por defecto 0.001.
             channel (int): Índice del canal a analizar. Por defecto 0.
             tmin (int): Tiempo inicial del segmento en segundos. Por defecto 0.
             tmax (int): Tiempo final del segmento en segundos. Por defecto 10.
@@ -216,6 +354,12 @@ class EMG(RawSignal):
             if channel >= self.data.shape[0]:
                 raise ValueError("El canal especificado excede el número de canales en la señal EMG.")
             
+            if isinstance(channel, str):
+                if channel in self.info.ch_names:
+                    channel = self.info.ch_names.index(channel)
+                else:
+                    raise ValueError(f"El canal '{channel}' no existe en la señal EMG.")
+                
             signal_1d = np.asarray(self.data[channel]).ravel()
 
         else:
@@ -247,6 +391,7 @@ class EMG(RawSignal):
         # Umbral mayor que el máximo (Nada está pintado)
         if umbral > max_value:
             logging.info(f"En el intervalo {tmin}-{tmax}s, la señal (max: {max_value:.2f}) no supera el umbral ({umbral}). No hay contracciones")
+        
         start_time_segundos = (slice_start + self.first_samp) / self.sfreq
         t = (np.arange(len(signal_1d)) / self.sfreq) + start_time_segundos
 
@@ -280,13 +425,9 @@ class EMG(RawSignal):
         """
         Función para generar espectrogramas tiempo-frecuencia de la señal EMG.
         """
-        pass    
 
-    def plot_activation(self):
-        """
-        Función para graficar la señal EMG con las activaciones musculares resaltadas.
-        """
-        pass
+
+        pass    
     
     def plotSignal(self, raw_emg:np.ndarray, tmin:int=0, tmax:int=10, show_ann:bool=True, channel:int=0):
         """
