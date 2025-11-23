@@ -32,7 +32,7 @@ tif_2025/                  # Directorio raíz
 │   │   ├── __init__.py
 │   │   ├── ecg.py         
 │   │   ├── eeg.py
-│   │   ├── emg.py         # En proceso
+│   │   ├── emg.py         
 │   │   ├── raw.py
 │   ├── utils/
 │   │   ├── __init__.py
