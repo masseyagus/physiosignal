@@ -79,12 +79,6 @@ class EMG(RawSignal):
         log_config(see_log)  
         self._logger = logging.getLogger(__name__) # __name__ toma el nombre del submódulo
 
-    def variation(self):
-        """
-        Función para el análisis de la variación temporal del EMG.
-        """
-        pass
-
     def tkeo_envelope(self, traditional:bool=False, channel:int|str=0, tmin:int=0, tmax:int=10):
         """
         Calcula y visualiza la envolvente de la señal EMG utilizando el operador de energía Teager-Kaiser (TKEO).
@@ -421,13 +415,113 @@ class EMG(RawSignal):
         plt.legend()
         plt.show()
 
-    def freq_time():
+    def freq_time(self, channel:int|str=0, tmin:float=0, tmax:float=10, nperseg:int=256, 
+                  absolute:bool=True, low_freq:float=None, high_freq:float=None, cmap:str='magma'):
         """
-        Función para generar espectrogramas tiempo-frecuencia de la señal EMG.
+        Genera y visualiza el espectrograma (análisis tiempo-frecuencia) de un canal específico.
+
+        Calcula la densidad espectral de potencia en función del tiempo utilizando ventanas deslizantes
+        (STFT) mediante `scipy.signal.spectrogram`. Permite recortar el análisis temporal y frecuencial,
+        ajustando automáticamente los ejes temporales según la posición absoluta de la señal (`first_samp`).
+
+        Args:
+            channel (int | str, opcional): Canal a analizar. Puede ser el índice (int) o el nombre (str).
+                                           El código actual solo soporta un canal a la vez. Por defecto 0.
+            tmin (float, opcional): Tiempo de inicio del análisis en segundos. Por defecto 0.
+            tmax (float, opcional): Tiempo final del análisis en segundos. Por defecto 10.
+            nperseg (int, opcional): Longitud de cada segmento para la FFT. Define la resolución
+                                     frecuencial y temporal. Por defecto 256.
+            absolute (bool, opcional): Si es True, interpreta `tmin` y `tmax` como tiempos absolutos
+                                       del registro original (considerando `first_samp`).
+                                       Si es False, los interpreta relativos al inicio del array de datos actual.
+                                       Por defecto True.
+            low_freq (float, opcional): Frecuencia mínima a mostrar/retornar (Hz). Por defecto None.
+            high_freq (float, opcional): Frecuencia máxima a mostrar/retornar (Hz). Por defecto None.
+            cmap (str, opcional): Nombre del mapa de colores de Matplotlib para la visualización.
+                                  Por defecto 'magma'.
+
+        Raises:
+            ValueError:
+                - Si `channel` no es un entero o una cadena.
+                - Si el nombre del canal no existe o el índice está fuera de rango.
+                - Si el intervalo de tiempo es inválido (`tmin > tmax` o ventana vacía).
+
+        Returns:
+            tuple:
+                - frequencys (np.ndarray): Array de frecuencias calculadas (Hz).
+                - time (np.ndarray): Array de tiempos correspondientes a los segmentos (s).
+                - Sxx (np.ndarray): Matriz de densidad espectral de potencia (lineal, no dB).
+                                    Forma (n_frecuencias, n_tiempos).
+
+        Notes:
+            - La visualización gráfica convierte la potencia a decibelios (10 * log10(Sxx)) para mejorar el contraste,
+              pero los datos retornados en `Sxx` están en escala lineal.
+            - Se utiliza `shading='gouraud'` en la gráfica para suavizar la representación visual.
         """
+        from scipy.signal import spectrogram
+        data_length = self.data.shape[1]
 
+        if not isinstance(channel, (int, str)):
+            raise ValueError("El parámetro 'channel' debe ser un entero (índice) o una cadena (nombre).")
 
-        pass    
+        if isinstance(channel, str) and channel not in self.info.ch_names:
+            raise ValueError(f"El canal '{channel}' no existe en la señal.")
+        
+        if tmin > tmax:
+            raise ValueError("Intervalo de tiempo inválido.")
+
+        ch_idx = self.info.ch_names.index(channel) if isinstance(channel, str) else channel
+
+        if ch_idx < 0 or ch_idx >= self.data.shape[0]:
+            raise ValueError("Índice de canal fuera de rango.")
+        
+        if absolute:
+            start = int((tmin * self.sfreq) - self.first_samp)
+            end = int((tmax * self.sfreq) - self.first_samp)
+
+            if start < 0:
+                start = 0
+                logging.info(f"tmin fue ajustado a 0s debido a first_samp ({self.first_samp} = {self.first_samp/self.sfreq}s).")
+                signal_absolute_start_time_sec = self.first_samp / self.sfreq
+            else:
+                signal_absolute_start_time_sec = tmin
+        else:
+            start = int(tmin * self.sfreq)
+            end = int(tmax * self.sfreq)
+            signal_absolute_start_time_sec = (self.first_samp / self.sfreq) + tmin
+
+        if end > data_length:
+            end = data_length
+            logging.info(f"tmax se ajustó al final de los datos ({data_length/self.sfreq}s relativos)")
+
+        if start >= end:
+            raise ValueError("Intervalo de tiempo inválido (tmin está después de tmax o fuera de rango).")
+
+        signal = self.data[ch_idx, start:end]
+        frequencys, times, Sxx = spectrogram(signal, fs=self.sfreq, nperseg=nperseg)
+
+        time = times + signal_absolute_start_time_sec  # ajustar tiempos absolutos
+
+        if low_freq is not None:
+            freq_mask = frequencys >= low_freq
+            frequencys = frequencys[freq_mask]
+            Sxx = Sxx[freq_mask, :]
+
+        if high_freq is not None:   
+            freq_mask = frequencys <= high_freq
+            frequencys = frequencys[freq_mask]
+            Sxx = Sxx[freq_mask, :]
+
+        plt.figure(figsize=(12, 6))
+        plt.pcolormesh(time, frequencys, 10 * np.log10(Sxx), shading='gouraud', cmap=cmap)
+        plt.colorbar(label='Potencia [dB]')
+        plt.ylabel('Frecuencia [Hz]')    
+        plt.xlabel('Tiempo [s]')
+        plt.title(f'Espectograma del canal {channel}')
+        plt.tight_layout()
+        plt.show()
+
+        return frequencys, time, Sxx  
     
     def plotSignal(self, raw_emg:np.ndarray, tmin:int=0, tmax:int=10, show_ann:bool=True, channel:int=0):
         """
@@ -588,3 +682,73 @@ class EMG(RawSignal):
         else:
             raise RuntimeError("La señal EMG no ha sido filtrada. No se puede graficar la señal filtrada.")
         
+    def get_activation_metrics(self, method:str='manual', threshold:float=None, std_multiplier:float=3.0, channel:int=0):
+        """
+        Calcula el umbral de activación y detecta los instantes de tiempo donde existe actividad muscular.
+
+        Utiliza la envolvente TKEO de la señal para determinar la actividad. El umbral puede ser definido
+        manualmente o calculado automáticamente basado en estadísticas de la señal (media + n*desviación estándar).
+
+        Args:
+            method (str): Método de definición del umbral.
+                          - 'manual': Usa el valor pasado en `threshold`.
+                          - 'statistical': Calcula umbral = media + (std_multiplier * std).
+            threshold (float, opcional): Valor del umbral si method='manual'.
+            std_multiplier (float, opcional): Multiplicador de la desviación estándar si method='statistical'.
+                                              Por defecto 3.0.
+            channel (int): Índice del canal a analizar. Por defecto 0.
+
+        Returns:
+            tuple:
+                - activation_threshold (float): El valor de corte utilizado (en unidades de energía si es TKEO).
+                - activation_times (np.ndarray): Array con los tiempos (en segundos) donde la señal supera el umbral.
+
+        Raises:
+            ValueError: Si el método no es reconocido o faltan parámetros requeridos.
+        """
+        import scipy.signal
+
+        # ------ Preparación de la señal ------
+        if len(self.data.shape) > 1:
+            signal_1d = np.asarray(self.data[channel]).ravel()
+        else:
+            signal_1d = self.data
+
+        # ------ Cálculo de la envolvente TKEO ------
+        tkeo = signal_1d.copy()
+        tkeo[1:-1] = signal_1d[1:-1]**2 - signal_1d[0:-2] * signal_1d[2:]
+        tkeo[0], tkeo[-1] = tkeo[1], tkeo[-2]
+        tkeo_rectified = np.abs(tkeo)
+
+        cut_off = 8
+        sos_env = scipy.signal.butter(2, cut_off, btype='low', fs=self.sfreq, output='sos')
+        envelope = scipy.signal.sosfiltfilt(sos_env, tkeo_rectified)
+
+        # ------ Definición del umbral de activación ------
+        if method == 'manual':
+            if threshold is None:
+                raise ValueError("Para el método 'manual' debes proporcionar un valor en 'threshold'.")
+            activation_threshold = threshold
+        
+        elif method == 'statistical':
+            # Método automático robusto: Media + N * Desviación Estándar
+            mean_val = np.mean(envelope)
+            std_val = np.std(envelope)
+            activation_threshold = mean_val + (std_multiplier * std_val)
+        
+        else:
+            raise ValueError("El método debe ser 'manual' o 'statistical'.")
+
+        # ------ Cálculo de tiempos absolutos ------
+        t = (np.arange(len(envelope)) + self.first_samp) / self.sfreq
+        
+        # ------ Detección de activaciones ------
+        mask = envelope > activation_threshold
+        
+        # ------ Filtrado de tiempos de activación ------
+        activation_times = t[mask]
+
+        self.activation_threshold = activation_threshold
+        self.activation_times = activation_times
+
+        return activation_threshold, activation_times
