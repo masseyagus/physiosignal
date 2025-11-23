@@ -85,26 +85,196 @@ class EMG(RawSignal):
         """
         pass
 
-    def hilbert(self):
+    def tkeo_envelope(self, traditional:bool=False, channel:int=0, tmin:int=0, tmax:int=10):
         """
-        Función para el análisis de la envolvente de la señal EMG usando la transformada de Hilbert.
+        Calcula y visualiza la envolvente de la señal EMG utilizando el operador de energía Teager-Kaiser (TKEO).
+
+        Aplica el operador TKEO para estimar la energía instantánea de la señal, rectifica el resultado y
+        suaviza mediante un filtro paso bajo Butterworth de segundo orden. Genera una gráfica comparativa
+        con doble eje Y para contrastar la amplitud original con la energía calculada, permitiendo visualizar
+        mejor los cambios bruscos de actividad (onsets).
+
+        Args:
+            traditional (bool): Si es True, calcula y grafica también la envolvente tradicional (rectificación
+                                + filtro paso bajo) para comparación. Por defecto False.
+            channel (int): Índice del canal a analizar. Por defecto 0.
+            tmin (int): Tiempo inicial del segmento en segundos. Por defecto 0.
+            tmax (int): Tiempo final del segmento en segundos. Por defecto 10.
+
+        Raises:
+            ValueError: Si el canal no existe, si los tiempos de ventana son inconsistentes (`tmin >= tmax`)
+                        o si la ventana solicitada no contiene datos.
+
+        Returns:
+            None: Muestra una gráfica comparativa (Amplitud vs Energía) mediante Matplotlib.
         """
-        pass
+        import scipy.signal
 
-    def segment(self, umbral:float):
+        if len(self.data.shape) > 1:
+            if channel >= self.data.shape[0]:
+                raise ValueError("El canal especificado excede el número de canales en la señal EMG.")
+            
+            signal_1d = np.asarray(self.data[channel]).ravel()
+
+        else:
+            if self.data.ndim > 1:
+                logging.info("La señal EMG tiene múltiples canales, se usará el canal 0 por defecto.")
+        
+        tmin_samps_global = int(tmin * self.sfreq)
+        tmax_samps_global = int(tmax * self.sfreq)
+
+        if tmin_samps_global >= tmax_samps_global:
+            raise ValueError("tmin debe ser menor que tmax y dentro del rango de la señal.")
+        
+        tmin_local = tmin_samps_global - int(self.first_samp)
+        tmax_local = tmax_samps_global - int(self.first_samp)
+
+        n_local = signal_1d.shape[0]
+        slice_start = max(0, tmin_local)
+        slice_end = min(n_local, tmax_local)
+
+        if slice_start >= slice_end:
+            raise ValueError("La ventana solicitada no intersecta la señal almacenada en esta instancia (revisar first_samp).")  
+
+        signal_1d = signal_1d[slice_start:slice_end]
+        tkeo = signal_1d.copy()
+
+        # Teager–Kaiser Energy operator 
+        tkeo[1:-1] = signal_1d[1:-1]**2 - signal_1d[0:-2]*signal_1d[2:]
+
+        # Corrección de bordes
+        tkeo[0], tkeo[-1] = tkeo[1], tkeo[-2]
+
+        # Rectificado de TKEO
+        tkeo_rectified = np.abs(tkeo)
+
+        cut_off = 8 # Frecuencia de corte de la envolvente
+        sos_env = scipy.signal.butter(2, cut_off, btype='low', fs=self.sfreq, output='sos')
+
+        # Filtro en la señal TKEO rectificada
+        envelope_tkeo = scipy.signal.sosfiltfilt(sos_env, tkeo_rectified)
+
+        start_time_segundos = (slice_start + self.first_samp) / self.sfreq
+        t = (np.arange(len(signal_1d)) / self.sfreq) + start_time_segundos
+
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        # --- Eje Izquierdo (Amplitud: Original + Tradicional) ---
+        ax.set_xlabel('Tiempo [s]')
+        ax.set_ylabel('Amplitud / Energía [µV]')
+        ax.tick_params(axis='y')
+
+        ln1 = ax.plot(t, signal_1d, label='Señal EMG Original', color="#4F4E4E", alpha=0.5, zorder=2)
+
+        if traditional:
+            # Comparación con el método tradicional
+            sos_raw = scipy.signal.butter(2, cut_off, btype='low', output='sos', fs=self.sfreq)
+            envelope_traditional = scipy.signal.sosfiltfilt(sos_raw, np.abs(signal_1d))
+            ln2 = ax.plot(t, envelope_traditional, label='Envolvente Tradicional', color="#0000FF", linestyle='--', alpha=0.6, zorder=2)
+       
+        # --- Eje Derecho (Energía: TKEO + Env TKEO) ---
+        ax2 = ax.twinx()
+        ax2.set_ylabel('Energía TKEO [µV²]')
+        ax2.tick_params(axis='y')
+
+        ln3 = ax2.plot(t, tkeo_rectified, label='TKEO (Rectificado)', color="#FE6600", alpha=0.6, zorder=3)
+
+        ln4 = ax2.plot(t, envelope_tkeo, label='Envolvente Final (TKEO + LowPass)', color="#3BE966", linewidth=2, zorder=4)
+
+        lines = ln1 + (ln2 if traditional else []) + ln3 + ln4
+        labels = [l.get_label() for l in lines]
+
+        ax.legend(lines, labels, loc='upper right')
+        ax.grid(True, alpha=0.6)
+        plt.title('Comparativa: EMG Original vs Envolvente Tradicional vs TKEO')
+        plt.show()
+        
+    def segment(self, umbral:float, min_duration:float=0.001, channel:int=0, tmin:int=0, tmax:int=10):
         """
-        Función para segmentar la señal EMG en períodos de contracción muscular basados en el umbral de activación.
+        Segmenta y visualiza períodos de activación muscular basándose en un umbral de amplitud.
+
+        Analiza un segmento específico de la señal y destaca visualmente las regiones donde la amplitud
+        supera el umbral definido. Utiliza `matplotlib.pyplot.fill_between` para generar un sombreado
+        continuo sobre los intervalos de activación activa, facilitando la identificación visual de
+        contracciones musculares.
+
+        Args:
+            umbral (float): Valor de amplitud (µV) mínimo para considerar una activación muscular.
+            min_duration (float): Duración mínima en segundos para considerar un evento válido.
+                                  Por defecto 0.001.
+            channel (int): Índice del canal a analizar. Por defecto 0.
+            tmin (int): Tiempo inicial del segmento en segundos. Por defecto 0.
+            tmax (int): Tiempo final del segmento en segundos. Por defecto 10.
+
+        Raises:
+            ValueError: Si el canal especificado no es válido o si el intervalo temporal es incorrecto.
+
+        Returns:
+            None: Muestra la gráfica con las zonas de activación sombreadas mediante Matplotlib.
         """
-        min_value = np.min(self.data)
-        max_value = np.max(self.data)
+        if len(self.data.shape) > 1:
+            if channel >= self.data.shape[0]:
+                raise ValueError("El canal especificado excede el número de canales en la señal EMG.")
+            
+            signal_1d = np.asarray(self.data[channel]).ravel()
 
-        if umbral < min_value or umbral >= max_value:
-            raise ValueError("El umbral de activación debe estar entre {:.2f} y {:.2f}".format(min_value, max_value))
+        else:
+            if self.data.ndim > 1:
+                logging.info("La señal EMG tiene múltiples canales, se usará el canal 0 por defecto.")
 
-        mask = self.data > umbral
-        data = self.data[mask]
+        tmin_samps_global = int(tmin * self.sfreq)
+        tmax_samps_global = int(tmax * self.sfreq)
 
-        pass
+        if tmin_samps_global >= tmax_samps_global:
+            raise ValueError("tmin debe ser menor que tmax y dentro del rango de la señal.")
+        
+        tmin_local = tmin_samps_global - int(self.first_samp)
+        tmax_local = tmax_samps_global - int(self.first_samp)
+
+        n_local = signal_1d.shape[0]
+        slice_start = max(0, tmin_local)
+        slice_end = min(n_local, tmax_local)
+
+        signal_1d = signal_1d[slice_start:slice_end]
+
+        min_value = np.min(signal_1d)
+        max_value = np.max(signal_1d)
+        
+        # Umbral menor que el mínimo de la señal (Todo está pintado)
+        if umbral < min_value:
+            logging.info(f"El umbral ({umbral}) es menor que toda la señal. Se seleccionará todo el tramo")
+        
+        # Umbral mayor que el máximo (Nada está pintado)
+        if umbral > max_value:
+            logging.info(f"En el intervalo {tmin}-{tmax}s, la señal (max: {max_value:.2f}) no supera el umbral ({umbral}). No hay contracciones")
+        start_time_segundos = (slice_start + self.first_samp) / self.sfreq
+        t = (np.arange(len(signal_1d)) / self.sfreq) + start_time_segundos
+
+        plt.figure(figsize=(12, 6))
+
+        # Grafica de la señal EMG completa
+        plt.plot(t, signal_1d, label='Señal EMG', color="#0022FF", alpha=0.7, zorder=5)
+
+        plt.fill_between(
+            t, 
+            np.min(signal_1d), # Valor mínimo
+            np.max(signal_1d), # Valor máximo
+            where=(signal_1d > umbral), # Condición para llenar
+            color="#9500FF", 
+            alpha=0.3, 
+            label=f'Sobre Umbral ({umbral})',
+            transform=plt.gca().get_xaxis_transform(), # Truco para llenar todo el alto Y
+        )
+        
+        # Línea punteada del umbral definido
+        plt.axhline(umbral, color='red', linestyle='--', alpha=0.5, label='Umbral')
+
+        plt.title('Segmentación de EMG: Contracciones Detectadas')
+        plt.xlabel('Tiempo [s]')
+        plt.ylabel('Amplitud [µV]')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+        plt.show()
 
     def freq_time():
         """
