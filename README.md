@@ -10,7 +10,7 @@ Una librería desarrollada en Python para el procesamiento, análisis y visualiz
 Diseñar e implementar una librería modular y escalable para el procesamiento de señales fisiológicas, aplicando técnicas de filtrado, detección de eventos y análisis espectral.
 
 ### Objetivos Específicos
-- Implementar clases para manejo de señales (`RawSignal`, `EEGSignal`, `ECGSignal`, `EMGSignal`).
+- Implementar clases para manejo de señales (`RawSignal`, `EEG`, `ECG`, `EMG`).
 - Integrar herramientas como NumPy, Pandas y Matplotlib para procesamiento y visualización.
 - Aplicar técnicas de filtrado (pasabanda, notch) y detección de eventos (picos R en ECG, activaciones en EMG).
 - Garantizar calidad mediante pruebas sistemáticas y gestión de versiones con Git/GitHub.
