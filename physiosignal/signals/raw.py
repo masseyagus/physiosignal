@@ -835,8 +835,6 @@ class RawSignal:
             plot_item = channel_widget.plot(times, data[idx, :], 
                             pen=pg.mkPen("#1f77b4", width=1.5)) # Pen especifica el trazado de la línea
             
-            # channel = picks if isinstance(picks, list) else [picks]
-            
             # Configuración de ejes
             channel_widget.setLabel('left', ch_name, 
                                 **{'color': 'k', 'font-size': '12pt',
@@ -1022,39 +1020,38 @@ class RawSignal:
 
     def fft(self, pick_channel:list[int]|int=0, plot:bool=True, low_freq:float=None, high_freq:float=None):
         """
-        Calcula la Transformada Rápida de Fourier (FFT) usando el método de Welch para la señal EEG y permite 
-        visualizar el espectro de potencia para canales y bandas de frecuencia específicos.
+        Calcula la Transformada Rápida de Fourier (FFT) usando el método de Welch y visualiza el espectro de potencia.
+
+        Estima la densidad espectral de potencia (PSD) de uno o varios canales seleccionados (por índice o nombre).
+        Permite visualizar el espectro en un rango de frecuencias específico, convirtiendo los resultados a escala
+        logarítmica (dB) y almacenándolos en los atributos de la instancia.
 
         Args:
-            pick_channel : list or str, optional
-                Lista o nombre de canales a analizar. Por defecto 'Cz'.
-            band : list or str, optional
-                Lista o nombre de bandas de frecuencia predefinidas a visualizar. 
-                Opciones: 'Delta', 'Theta', 'Alpha', 'Beta', 'Gamma'. Por defecto 'Alpha'.
-            plot : bool, optional
-                Si True, muestra gráficos del espectro de potencia. Por defecto True.
-            low_freq : float, optional
-                Límite inferior de frecuencia personalizado (Hz). Si se especifica junto con high_freq, 
-                ignora las bandas predefinidas. Por defecto None.
-            high_freq : float, optional
-                Límite superior de frecuencia personalizado (Hz). Si se especifica junto con low_freq, 
-                ignora las bandas predefinidas. Por defecto None.
+            pick_channel (int | str | list[str], opcional): Canal(es) a analizar.
+                - Si es `int`: Índice del canal.
+                - Si es `str`: Nombre del canal (ej. 'Cz').
+                - Si es `list[str]`: Lista de nombres de canales (ej. ['Fp1', 'Fp2']).
+                Por defecto 0.
+            plot (bool, opcional): Si es True, genera un gráfico del espectro de potencia. Por defecto True.
+            low_freq (float, opcional): Frecuencia mínima (Hz) para el gráfico y análisis.
+                                        Si es None, se usa 0 Hz. Por defecto None.
+            high_freq (float, opcional): Frecuencia máxima (Hz) para el gráfico y análisis.
+                                         Si es None, se usa la frecuencia de Nyquist (sfreq / 2). Por defecto None.
 
         Raises:
-            ValueError
-                Si no se ha aplicado previamente un método de referencia, si los canales especificados no existen,
-                o si las bandas de frecuencia no son válidas.
+            ValueError: Si se proporciona un nombre de canal que no existe en `self.info.ch_names`.
+            IndexError: Si el índice proporcionado está fuera del rango.
 
-        Notes:
-            El espectro de potencia se calcula usando el método de Welch y se convierte a escala logarítmica (dB).
-            Los resultados se guardan en los atributos `fft_psd` (densidad espectral de potencia) y `fft_freq` (frecuencias).
-            Si se especifican low_freq y high_freq, se ignora el parámetro band y se usa el rango de frecuencia personalizado.
-            El gráfico muestra el espectro de potencia suavizado para cada canal seleccionado.
+        Returns:
+            None: Actualiza `self.fft_psd` y `self.fft_freq`. Si `plot=True`, muestra el gráfico.
 
         Examples:
-            >>> eeg.fft(pick_channel='Cz', band='Alpha')
-            >>> eeg.fft(pick_channel=['Cz', 'Pz'], band=['Alpha', 'Beta'])
-            >>> eeg.fft(pick_channel='Oz', low_freq=8.0, high_freq=12.0)
+            >>> # Por índice
+            >>> signal.fft(pick_channel=0)
+            >>> # Por nombre
+            >>> signal.fft(pick_channel='Cz')
+            >>> # Lista de nombres
+            >>> signal.fft(pick_channel=['Fp1', 'Fp2'], low_freq=1.0, high_freq=30.0)
         """
         from scipy.signal import welch
         import matplotlib.cm as cm
@@ -1062,9 +1059,26 @@ class RawSignal:
 
         data = np.atleast_2d(self.data)
 
-        ch_idx = pick_channel
-        if isinstance(ch_idx, int):
-                    ch_idx = [ch_idx]
+        # --- Selección de canales ---
+        if isinstance(pick_channel, int):
+                    ch_idx = [pick_channel]
+
+        elif isinstance(pick_channel, list):
+            ch_idx = []
+            for ch in pick_channel:
+                if ch in self.info.ch_names:
+                    ch_idx.append(self.info.ch_names.index(ch))
+                else:
+                    raise ValueError(f"El canal '{ch}' no existe en la señal.")
+        
+        elif isinstance(pick_channel, str):
+            if pick_channel in self.info.ch_names:
+                ch_idx = [self.info.ch_names.index(pick_channel)]
+            else:
+                raise ValueError(f"El canal '{pick_channel}' no existe en la señal.")
+        
+        else:
+            ch_idx = [0] # Por defecto, primer canal
 
         data_ch = data[ch_idx, :]
         freqs, psd = welch(data_ch, fs=self.sfreq, nperseg=1024, axis=1)
@@ -1073,7 +1087,6 @@ class RawSignal:
         self.fft_freq = freqs
 
         if plot:
-
             # Configuración de colores
             if len(ch_idx) <= 8:
                 distinct_colors = [
