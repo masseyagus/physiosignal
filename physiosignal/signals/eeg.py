@@ -171,7 +171,7 @@ class EEG(RawSignal):
     """
     
     def __init__(self, raw:RawSignal=None, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
-                 first_samp:int=0, see_log:bool=True, reference:str='promedio', is_filetered:bool=False):
+                 first_samp:int=0, see_log:bool=True, reference:str='promedio', is_filtered:bool=False):
         """
         Inicializa una instancia de EEGSignal.
 
@@ -797,17 +797,26 @@ class EEG(RawSignal):
 
         ch_idx = [self.info.ch_names.index(ch) for ch in channels]
 
-        # Calculo índices de tiempo
-        n_samps_total = self.data_ref.shape[1]
-        tmin_samps = int(tmin * self.sfreq)
-        tmax_samps = int(tmax * self.sfreq)
+        # Conversión de Tiempo Absoluto a Muestras Globales
+        tmin_samps_global = int(tmin * self.sfreq)
+        tmax_samps_global = int(tmax * self.sfreq)
 
-        # Aseguro que los índices estén dentro del rango
-        tmin_samps = max(0, tmin_samps)
-        tmax_samps = min(n_samps_total, tmax_samps)
+        # Ajuste por first_samp 
+        offset = int(self.first_samp)
+        tmin_local = tmin_samps_global - offset
+        tmax_local = tmax_samps_global - offset
+
+        # Validaciones de rango
+        n_samps_total = self.data_ref.shape[1]
+
+        start_idx = max(0, tmin_local)
+        end_idx = min(n_samps_total, tmax_local)
+
+        if start_idx >= end_idx:
+            raise ValueError(f"El intervalo {tmin}-{tmax}s no intersecta con los datos cargados (Inicio datos: {offset/self.sfreq}s).")
 
         # Extraemos datos de los canales seleccionados en el intervalo de tiempo
-        data = self.data_ref[ch_idx, tmin_samps:tmax_samps]
+        data = self.data_ref[ch_idx, start_idx:end_idx]
 
         # Filtro en la banda de frecuencia especificada
         if freq_band is not None:
@@ -822,9 +831,12 @@ class EEG(RawSignal):
         hilbert_signal = hilbert(data, axis=1)
         envelope = np.abs(hilbert_signal)
 
+        real_tmin = (start_idx + offset) / self.sfreq
+        real_tmax = (end_idx + offset) / self.sfreq
+
         # Ploteo
         if plot:
-            self._plot_hilbert(channels, hilbert_signal, envelope, tmin, tmax)
+            self._plot_hilbert(channels, hilbert_signal, envelope, real_tmin, real_tmax)
 
         return hilbert_signal, envelope
 
@@ -1100,4 +1112,3 @@ class EEG(RawSignal):
             plt.show()
 
             return erp
-
