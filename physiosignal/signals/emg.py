@@ -8,31 +8,79 @@ import matplotlib.pyplot as plt
 import numpy as np
 import logging
 
-# Futura implementación
 class EMG(RawSignal):
     """
-    Representa una señal de Electromiografía (EMG) con detección de activaciones musculares.
+    Representa una señal de Electromiografía (EMG) con utilidades especializadas para
+    procesamiento de envolventes, detección de actividad muscular y análisis espectral.
+
+    Al inicializar, configura el logger interno y gestiona la carga de datos. Si se pasa
+    un objeto `RawSignal` mediante el parámetro `raw`, la inicialización ejecuta la lógica
+    base copiando profundamente sus atributos (`data`, `info`, `anotaciones`, etc.) para
+    preservar la integridad del objeto original y heredar su estado, estableciendo además
+    el flag `is_filtered` según corresponda.
 
     Key Features:
-        - Configuración de umbral de activación
-        - Detección de segmentos de contracción
-        - Espectrogramas tiempo-frecuencia para análisis
+        - Cálculo de envolventes de energía (TKEO) para detección precisa de onsets.
+        - Cálculo de envolventes de amplitud (Hilbert) para estimación de fuerza muscular.
+        - Detección automática y manual de umbrales de activación (`get_activation_metrics`).
+        - Segmentación visual de intervalos de contracción activa (`segment`).
+        - Análisis tiempo-frecuencia (espectrogramas) con ajuste temporal absoluto.
+        - Visualización diagnóstica comparativa entre señal cruda y procesada.
 
     Attributes:
         data : np.ndarray
-            Señal EMG cruda de forma (n_canales, n_muestras).
+            Señal EMG actual con forma (n_canales, n_muestras). Puede ser la señal cruda
+            o una versión filtrada, dependiendo del estado de `is_filtered`.
         sfreq : float
             Frecuencia de muestreo en Hz.
         info : Info
             Metadatos de canales.
         anotaciones : Annotations
-            Eventos temporales asociados.
+            Anotaciones de eventos temporales (onset, duration, description).
         first_samp : int
-            Índice de la primera muestra respecto al inicio original.
-        activation_threshold : float | None
-            Umbral de detección de activación en la señal.
-        activation_times : np.ndarray | list | None
-            Índices de muestras donde la señal supera `activation_threshold`.
+            Índice de la primera muestra respecto al inicio original. Es crucial para
+            mantener la coherencia temporal absoluta en recortes y visualizaciones.
+        is_filtered : bool
+            Indica si `self.data` ha sido sometido a algún proceso de filtrado.
+            Se hereda del objeto `raw` o se define en la inicialización.
+        activation_threshold : float, opcional
+            Valor del umbral calculado o definido para determinar actividad muscular.
+            Se actualiza mediante `get_activation_metrics`.
+        activation_times : np.ndarray, opcional
+            Vector de tiempos absolutos (segundos) donde la señal supera el umbral.
+            Se actualiza mediante `get_activation_metrics`.
+        _logger : logging.Logger
+            Logger interno configurado según el parámetro `see_log`.
+
+    Notes:
+        - Si se inicializa con `raw=...`, la clase realiza copias profundas (`deepcopy`)
+          de los datos para evitar mutaciones accidentales en el objeto original.
+        - La diferencia clave entre métodos de envolvente:
+            * `tkeo_envelope`: Estima energía (aprox. µV²). Ideal para detectar *cuándo*
+              empieza una contracción debido a su alta sensibilidad a cambios bruscos.
+            * `hilbert`: Estima amplitud (µV). Ideal para visualizar *cuánta* fuerza
+              se está ejerciendo, manteniendo las unidades originales.
+        - Los métodos de visualización (`plotSignal`, `segment`, `hilbert`) utilizan
+          `first_samp` para proyectar el eje X en tiempos absolutos reales.
+        - Para la segmentación automática, se recomienda usar primero `get_activation_metrics`
+          con el método TKEO para obtener un umbral robusto frente al ruido.
+
+    Examples:
+        >>> # Instanciación desde una señal cruda existente
+        >>> emg = EMG(raw=my_raw_signal)
+        >>>
+        >>> # Comparación de métodos de envolvente
+        >>> emg.tkeo_envelope(traditional=True, channel=0)
+        >>>
+        >>> # Detección automática de activación (Media + 3*STD)
+        >>> umbral, tiempos = emg.get_activation_metrics(method='statistical', std_multiplier=3)
+        >>> print(f"Umbral detectado: {umbral}")
+        >>>
+        >>> # Visualización de la segmentación basada en el umbral
+        >>> emg.segment(umbral=umbral, tmin=10, tmax=20)
+        >>>
+        >>> # Análisis de amplitud con Hilbert
+        >>> analytic, env = emg.hilbert(tmin=10, tmax=20, low_freq=20, high_freq=450)
     """
     
     def __init__(self, raw:RawSignal=None, data:np.ndarray=None, sfreq:float=None, info:Info=None, anotaciones:Annotations=None, 
