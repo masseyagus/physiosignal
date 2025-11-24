@@ -19,9 +19,9 @@ Diseñar e implementar una librería modular y escalable para el procesamiento d
 
 ## 🗂 Estructura del Repositorio
 ```plaintext
-tif_2025/                  # Directorio raíz
-├── physiosignal/          # Código fuente del sistema
-│   ├──info/
+physiosignal/              # Directorio raíz del repositorio
+├── physiosignal/          # Paquete principal (código fuente)
+│   ├── info/
 │   │   ├── __init__.py
 │   │   ├── annotations.py
 │   │   ├── info.py
@@ -37,9 +37,9 @@ tif_2025/                  # Directorio raíz
 │   ├── utils/
 │   │   ├── __init__.py
 │   │   ├── a_checkers.py
+│   ├── __init__.py
 ├── testings/
 │   ├── test_sys.ipynb 
-├── __init__.py
 ├── .gitignore
 ├── README.md
 ├── requirements.txt
