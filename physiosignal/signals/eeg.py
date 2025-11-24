@@ -650,8 +650,8 @@ class EEG(RawSignal):
                     title = f'Espectro de Potencia - {channel_title} - Banda {band_name} ({current_low_freq}-{current_high_freq} Hz)'
                 
                 ax.set_title(title)
-                ax.set_xlabel('Frecuencia (Hz)')
-                ax.set_ylabel('Densidad Espectral de Potencia (dB)')
+                ax.set_xlabel('Frecuencia [Hz]')
+                ax.set_ylabel('Densidad Espectral de Potencia [dB]')
                 ax.legend(loc='upper right', fontsize=10, framealpha=0.9)
                 
                 ax.grid(True, alpha=0.3)
@@ -991,8 +991,8 @@ class EEG(RawSignal):
         ax.axhline(0, color="#000000", linestyle='-', alpha=0.5)
         ax.axvline(0, color="#000000", linestyle='-', alpha=0.9, label='Evento')
 
-        ax.set_xlabel('Tiempo (s)')
-        ax.set_ylabel('Amplitud (µV)')
+        ax.set_xlabel('Tiempo [s]')
+        ax.set_ylabel('Amplitud [µV]')
         ax.legend()
         ax.set_title(f'Waveforms ERP para Canales de Interés ({event_num_to_name[event_index].capitalize()})')
         
@@ -1058,7 +1058,7 @@ class EEG(RawSignal):
                 ax[idx].set_title(f'{band_name} ({low_freq}-{high_freq}) Hz')
 
             cbar = fig.colorbar(im, ax=ax[-1])
-            cbar.set_label(r'Potencia ($µV^2$)')
+            cbar.set_label(r'Potencia [$µV^2$]')
 
             if len(freq_bands) < 6:
                 fig.delaxes(ax[-1])
