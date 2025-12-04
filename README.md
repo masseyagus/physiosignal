@@ -52,7 +52,7 @@ physiosignal/              # Directorio raíz del repositorio
 Este proyecto está licenciado bajo los términos de la licencia MIT.
 Consulta el archivo LICENSE.md para más información.
 
---
+---
 
 ## ⚙️ Requisitos
 
@@ -68,7 +68,7 @@ Consulta el archivo LICENSE.md para más información.
   - MNE
   - NeuroKit2
 
---
+---
 
 ## 📐 Diagrama de Clases UML
 
