@@ -5,6 +5,13 @@ setup(
     version="2.0.1",
     description="Librería para procesamiento de señales EEG, ECG y EMG",
     author="Agustín Quintana",
+    license="MIT",
+    classifiers=[
+        "License :: OSI Approved :: MIT License",
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.10",
+        "Operating System :: OS Independent",
+    ],
     packages=find_packages(),
     install_requires=[
         "numpy>=1.21",
