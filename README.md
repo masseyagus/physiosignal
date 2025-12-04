@@ -47,11 +47,12 @@ physiosignal/              # Directorio raíz del repositorio
 ```
 ---
 
-## 📐 Diagrama de Clases UML
+## 📜 Licencia
 
-![Diagrama UML](./uml.jpg)
+Este proyecto está licenciado bajo los términos de la licencia MIT.
+Consulta el archivo LICENSE.md para más información.
 
----
+--
 
 ## ⚙️ Requisitos
 
@@ -66,3 +67,9 @@ physiosignal/              # Directorio raíz del repositorio
   - PyQt5
   - MNE
   - NeuroKit2
+
+--
+
+## 📐 Diagrama de Clases UML
+
+![Diagrama UML](./uml.jpg)
