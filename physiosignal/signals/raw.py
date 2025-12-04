@@ -656,11 +656,9 @@ class RawSignal:
         """
         import pyqtgraph as pg
         import sys
-        import numpy as np
         from PyQt5.QtWidgets import (QApplication, QMainWindow, 
-                                    QScrollArea, QVBoxLayout, QWidget, QDesktopWidget)
+                                    QScrollArea, QVBoxLayout, QWidget, QDesktopWidget, QLabel, QHBoxLayout)
         from PyQt5.QtCore import Qt
-        from PyQt5.QtWidgets import QLabel, QHBoxLayout
         import itertools
 
         # 1. Configuración inicial de datos
@@ -744,7 +742,7 @@ class RawSignal:
         SPACING = 5  # Espacio entre canales. 
 
         # 5. Función para determinar límites Y inteligentes
-        def get_ylimits(signal, ch_type):
+        def get_ylimits(signal):
             """
             Calcula límites Y adaptativos y seguros para plotear una señal 1D.
 
@@ -841,7 +839,7 @@ class RawSignal:
                                    'font-family':'Times New Roman'}) # Configuro el nombre del eje de ese canal y su formato
             
             # Configurar límites Y adaptativos (uso función get_ylimits())
-            y_min, y_max = get_ylimits(data[idx, :], ch_type)
+            y_min, y_max = get_ylimits(data[idx, :])
             channel_widget.setYRange(y_min, y_max)
             
             # Mostrar solo el eje X en el último canal
