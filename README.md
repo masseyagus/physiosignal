@@ -42,6 +42,7 @@ physiosignal/              # Directorio raíz del repositorio
 │   ├── test_sys.ipynb 
 ├── .gitignore
 ├── README.md
+├── LICENSE.md
 ├── requirements.txt
 └── setup.py
 ```
